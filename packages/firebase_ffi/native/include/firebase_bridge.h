@@ -26,6 +26,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "kn_bridge.h"
+
 // The library is built with hidden visibility, so the ABI is opted in
 // explicitly. Without this the symbols exist in the object file and are absent
 // from the dynamic table, which the VM reports as an unresolved native
@@ -485,7 +487,7 @@ FDB_EXPORT int64_t fdb_fs_set(const char* doc_path, const uint8_t* cbor,
 
 /* Reads `doc_path`. Posts the document as a snapshot buffer on `port`: the
  * usual header, then a CBOR map, or an empty payload when it does not exist. */
-FDB_EXPORT int64_t fdb_fs_get(const char* doc_path, int64_t port);
+FDB_EXPORT int64_t fdb_fs_get(const char* doc_path, void* userdata, FdbCallback cb);
 
 /* Deletes `doc_path`. Outcome posted as for fdb_fs_set. */
 /* Runs a query over a collection. `spec` is a CBOR map, or null for a plain

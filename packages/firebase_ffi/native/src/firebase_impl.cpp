@@ -1,189 +1,155 @@
 // SPDX-FileCopyrightText: 2026 Joel Winarske
 // SPDX-License-Identifier: Apache-2.0
 
-// v2 — the real Realtime Database behind the same C ABI.
+// Cloud Firestore, on the same firebase::App as Auth and Database.
 //
-// Compiled only when the SDK was found (FDB_HAVE_FIREBASE). The transport half
-// in bridge.cpp is unchanged and still measurable; this adds the calls that
-// make fdb_set and fdb_listen talk to Firebase instead of to a synthetic
-// emitter.
+// Documents cross as CBOR in both directions, which is the reason this file is
+// shorter than the Database one: the encoding is a library's problem on each
+// side, not a hand-written pair that has to agree.
 //
-// Two things shape the design:
-//
-//  * A DataSnapshot is only valid inside its callback, so the Variant must be
-//    serialized there. That copy is unavoidable in any transport, which is why
-//    the benchmark treats it as the floor rather than as overhead.
-//
-//  * ValueListener callbacks arrive on SDK worker threads, and
-//    Dart_PostCObject_DL is safe from any thread. So the snapshot goes straight
-//    to the port from the SDK's own thread — no marshal to a platform thread,
-//    which is the structural advantage over a method channel.
+// The mapping is in firebase_bridge.h. What is worth restating here: sentinels
+// are instructions, not values. Firestore never returns them, so DecodeValue
+// accepts them (a write may contain one) and EncodeValue never produces one.
 
-#include <cstdlib>
-#include <condition_variable>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
-#include <map>
-#include <algorithm>
-#include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
-#include "dart_api_dl.h"
 #include "cbor.h"
+#include "dart_api_dl.h"
 #include "fdb_cbor.h"
 #include "firebase_bridge.h"
+#include "kn_bridge.h"
 
 #include "firebase/app.h"
-#include "firebase/database.h"
-#include "firebase/database/disconnection.h"
-#include "firebase/database/mutable_data.h"
-#include "firebase/database/transaction.h"
-#include "firebase/database/listener.h"
-#include "firebase/variant.h"
+#include "firebase/firestore.h"
 
 namespace {
 
-using ::firebase::App;
-using ::firebase::Variant;
-using ::firebase::database::Database;
-using ::firebase::database::DataSnapshot;
-using ::firebase::database::Error;
-using ::firebase::database::ValueListener;
+using ::firebase::firestore::FieldPath;
+using ::firebase::firestore::DocumentReference;
+using ::firebase::firestore::DocumentSnapshot;
+using ::firebase::firestore::FieldValue;
+using ::firebase::firestore::Firestore;
+using ::firebase::firestore::ListenerRegistration;
+using ::firebase::firestore::MapFieldValue;
+using ::firebase::firestore::Query;
+using ::firebase::firestore::Transaction;
+using ::firebase::firestore::SetOptions;
 
-App* g_app = nullptr;
-Database* g_database = nullptr;
-// Whether the app was given a database url. A project with no Realtime
-// Database has none, and the SDK does not refuse the Database in that case --
-// DatabaseInternal::initialized() is app_ != nullptr, so GetInstance hands
-// back an instance whose Repo could not finish setting up.
-bool g_has_database_url = false;
 std::mutex g_mutex;
+Firestore* g_firestore = nullptr;
+int64_t g_next_listener = 1;
+std::unordered_map<int64_t, ListenerRegistration> g_listeners;
 
-// ── Variant → a flat tagged buffer ──────────────────────────────────────────
-//
-// One pass, one allocation, depth-first. Every node is a tag byte followed by
-// its payload; containers write their element count and then their children
-// inline. Dart can walk this without allocating per node, which is the point:
-// the alternative is building an EncodableValue tree that a codec then
-// re-serializes.
-// firebase::Variant serialized as CBOR (RFC 8949).
-//
-// A standard format rather than a private one: the Dart side decodes with a
-// conformant package, so a malformed message is rejected by an implementation
-// this project did not write, and the two halves cannot drift apart in the way
-// a hand-synced tag table can.
-//
-// Sizing pass then encode: CborNoMoreMemory tells us the buffer was short, so
-// the first pass measures against a null buffer and the second fills one.
-bool EncodeVariant(const Variant& v, CborEncoder* enc);
+// --- encode: FieldValue -> CBOR ------------------------------------------
 
-bool EncodeVariant(const Variant& v, CborEncoder* enc) {
-  if (v.is_null()) return cbor_encode_null(enc) == CborNoError;
-  if (v.is_bool()) return cbor_encode_boolean(enc, v.bool_value()) == CborNoError;
-  if (v.is_int64()) return cbor_encode_int(enc, v.int64_value()) == CborNoError;
-  if (v.is_double()) return cbor_encode_double(enc, v.double_value()) == CborNoError;
-  if (v.is_string()) {
-    const char* s = v.string_value();
-    return cbor_encode_text_string(enc, s ? s : "", s ? std::strlen(s) : 0) ==
-           CborNoError;
-  }
-  if (v.is_blob()) {
-    // Byte string, distinct from text — the previous encoding had no way to say
-    // this and wrote null instead.
-    return cbor_encode_byte_string(enc, v.blob_data(),
-                                   static_cast<size_t>(v.blob_size())) ==
-           CborNoError;
-  }
-  if (v.is_vector()) {
-    const auto& items = v.vector();
-    CborEncoder array;
-    if (cbor_encoder_create_array(enc, &array, items.size()) != CborNoError) {
+bool EncodeValue(const FieldValue& v, CborEncoder* enc);
+
+bool EncodeMap(const MapFieldValue& m, CborEncoder* enc) {
+  CborEncoder map;
+  if (cbor_encoder_create_map(enc, &map, m.size()) != CborNoError) return false;
+  for (const auto& entry : m) {
+    if (cbor_encode_text_string(&map, entry.first.c_str(),
+                                entry.first.size()) != CborNoError) {
       return false;
     }
-    for (const auto& item : items) {
-      if (!EncodeVariant(item, &array)) return false;
-    }
-    return cbor_encoder_close_container(enc, &array) == CborNoError;
+    if (!EncodeValue(entry.second, &map)) return false;
   }
-  if (v.is_map()) {
-    const auto& entries = v.map();
-    CborEncoder map;
-    if (cbor_encoder_create_map(enc, &map, entries.size()) != CborNoError) {
-      return false;
-    }
-    for (const auto& entry : entries) {
-      // Database keys are strings. Anything else is a response this build does
-      // not understand; encoding it as null keeps the map well-formed and the
-      // pair count honest.
-      if (entry.first.is_string()) {
-        const char* k = entry.first.string_value();
-        if (cbor_encode_text_string(&map, k ? k : "", k ? std::strlen(k) : 0) !=
-            CborNoError) {
-          return false;
-        }
-      } else if (cbor_encode_null(&map) != CborNoError) {
-        return false;
-      }
-      if (!EncodeVariant(entry.second, &map)) return false;
-    }
-    return cbor_encoder_close_container(enc, &map) == CborNoError;
-  }
-  return cbor_encode_null(enc) == CborNoError;
+  return cbor_encoder_close_container(enc, &map) == CborNoError;
 }
 
-// Encodes [v] into [out]. Measures first, so the buffer is exact.
+bool EncodeValue(const FieldValue& v, CborEncoder* enc) {
+  switch (v.type()) {
+    case FieldValue::Type::kNull:
+      return cbor_encode_null(enc) == CborNoError;
+    case FieldValue::Type::kBoolean:
+      return cbor_encode_boolean(enc, v.boolean_value()) == CborNoError;
+    case FieldValue::Type::kInteger:
+      return cbor_encode_int(enc, v.integer_value()) == CborNoError;
+    case FieldValue::Type::kDouble:
+      return cbor_encode_double(enc, v.double_value()) == CborNoError;
+    case FieldValue::Type::kString: {
+      const std::string s = v.string_value();
+      return cbor_encode_text_string(enc, s.c_str(), s.size()) == CborNoError;
+    }
+    case FieldValue::Type::kBlob:
+      return cbor_encode_byte_string(enc, v.blob_value(), v.blob_size()) ==
+             CborNoError;
+    case FieldValue::Type::kTimestamp: {
+      const auto ts = v.timestamp_value();
+      CborEncoder pair;
+      if (cbor_encode_tag(enc, FDB_CBOR_TAG_TIMESTAMP) != CborNoError ||
+          cbor_encoder_create_array(enc, &pair, 2) != CborNoError ||
+          cbor_encode_int(&pair, ts.seconds()) != CborNoError ||
+          cbor_encode_int(&pair, ts.nanoseconds()) != CborNoError) {
+        return false;
+      }
+      return cbor_encoder_close_container(enc, &pair) == CborNoError;
+    }
+    case FieldValue::Type::kGeoPoint: {
+      const auto gp = v.geo_point_value();
+      CborEncoder pair;
+      if (cbor_encode_tag(enc, FDB_CBOR_TAG_GEOPOINT) != CborNoError ||
+          cbor_encoder_create_array(enc, &pair, 2) != CborNoError ||
+          cbor_encode_double(&pair, gp.latitude()) != CborNoError ||
+          cbor_encode_double(&pair, gp.longitude()) != CborNoError) {
+        return false;
+      }
+      return cbor_encoder_close_container(enc, &pair) == CborNoError;
+    }
+    case FieldValue::Type::kReference: {
+      const std::string path = v.reference_value().path();
+      return cbor_encode_tag(enc, FDB_CBOR_TAG_REFERENCE) == CborNoError &&
+             cbor_encode_text_string(enc, path.c_str(), path.size()) ==
+                 CborNoError;
+    }
+    case FieldValue::Type::kArray: {
+      const auto items = v.array_value();
+      CborEncoder array;
+      if (cbor_encoder_create_array(enc, &array, items.size()) != CborNoError) {
+        return false;
+      }
+      for (const auto& item : items) {
+        if (!EncodeValue(item, &array)) return false;
+      }
+      return cbor_encoder_close_container(enc, &array) == CborNoError;
+    }
+    case FieldValue::Type::kMap:
+      return EncodeMap(v.map_value(), enc);
+    default:
+      // Sentinels are never returned by Firestore. Reaching here means the SDK
+      // produced one, which would be a change in its behavior, not ours.
+      return cbor_encode_null(enc) == CborNoError;
+  }
+}
+
 }  // namespace
 
 namespace fdb {
 
-// An upper bound on the CBOR size of [v], from one cheap walk.
-//
-// Every scalar costs a header and at most eight bytes; a string or a blob
-// costs its own bytes plus a header; a container costs a header plus its
-// children. Never under-counts, so the first encode fits and the retry below
-// stays a safety net.
-size_t EstimateVariantBytes(const Variant& v) {
-  // A header is one byte plus at most eight of length or payload.
-  constexpr size_t kHeader = 9;
-  if (v.is_string()) {
-    const char* s = v.string_value();
-    return kHeader + (s == nullptr ? 0 : std::strlen(s));
-  }
-  if (v.is_blob()) return kHeader + static_cast<size_t>(v.blob_size());
-  if (v.is_vector()) {
-    size_t n = kHeader;
-    for (const Variant& item : v.vector()) n += EstimateVariantBytes(item);
-    return n;
-  }
-  if (v.is_map()) {
-    size_t n = kHeader;
-    for (const auto& entry : v.map()) {
-      n += EstimateVariantBytes(entry.first) +
-           EstimateVariantBytes(entry.second);
-    }
-    return n;
-  }
-  return kHeader;
-}
-
-bool SerializeVariant(const Variant& v, std::vector<uint8_t>& out) {
-  // Sized from the value rather than found by doubling. A measuring pass with
-  // tinycbor is not an option — the encoders here stop at the first
-  // CborErrorOutOfMemory, so it would count only the bytes written before that
-  // — and doubling from a fixed start re-encodes the whole value once per
-  // attempt: ten times over for a 256 KB snapshot, which is on the Database
-  // and Firestore listener paths.
+bool SerializeDocument(const MapFieldValue& m, std::vector<uint8_t>& out) {
+  // Grow-and-retry rather than a sizing pass against a null buffer: the
+  // encoders here stop at the first error, so a measuring pass abandons the
+  // walk as soon as the first container reports CborErrorOutOfMemory and only
+  // the bytes written before that get counted. The real pass then overflows a
+  // buffer sized from a partial count.
   //
-  // The estimate cannot under-count, so the loop below is a safety net rather
-  // than the mechanism.
-  size_t cap = EstimateVariantBytes(v);
+  // Doubling from a reasonable start costs at most a few wasted encodes and
+  // cannot under-count, because success is the loop's only exit.
+  size_t cap = 512;
   for (int attempt = 0; attempt < 16; ++attempt) {
     out.assign(cap, 0);
     CborEncoder enc;
     cbor_encoder_init(&enc, out.data(), cap, 0);
-    if (EncodeVariant(v, &enc)) {
+    if (EncodeMap(m, &enc)) {
       out.resize(cbor_encoder_get_buffer_size(&enc, out.data()));
       return true;
     }
@@ -191,239 +157,466 @@ bool SerializeVariant(const Variant& v, std::vector<uint8_t>& out) {
   }
   out.clear();
   return false;
-}
-
-
-// Encodes a snapshot's child keys, in the order the query produced them, as
-// nested [key, sub-order | null] pairs. Empty for a leaf.
-bool EncodeOrder(const firebase::database::DataSnapshot& snap,
-                 CborEncoder* enc) {
-  const std::vector<firebase::database::DataSnapshot> kids = snap.children();
-  CborEncoder array;
-  if (cbor_encoder_create_array(enc, &array, kids.size()) != CborNoError) {
-    return false;
-  }
-  for (const auto& child : kids) {
-    CborEncoder entry;
-    if (cbor_encoder_create_array(&array, &entry, 2) != CborNoError) {
-      return false;
-    }
-    const std::string key = child.key_string();
-    if (cbor_encode_text_stringz(&entry, key.c_str()) != CborNoError) {
-      return false;
-    }
-    if (child.has_children()) {
-      if (!EncodeOrder(child, &entry)) return false;
-    } else if (cbor_encode_null(&entry) != CborNoError) {
-      return false;
-    }
-    if (cbor_encoder_close_container(&array, &entry) != CborNoError) {
-      return false;
-    }
-  }
-  return cbor_encoder_close_container(enc, &array) == CborNoError;
-}
-
-bool DecodeVariant(CborValue* it, Variant* out);
-
-bool DecodeVariantMap(CborValue* it, Variant* out) {
-  CborValue entry;
-  if (cbor_value_enter_container(it, &entry) != CborNoError) return false;
-  std::map<Variant, Variant> map;
-  while (!cbor_value_at_end(&entry)) {
-    Variant key;
-    Variant value;
-    if (!DecodeVariant(&entry, &key)) return false;
-    if (!DecodeVariant(&entry, &value)) return false;
-    map.emplace(key, value);
-  }
-  if (cbor_value_leave_container(it, &entry) != CborNoError) return false;
-  *out = Variant(map);
-  return true;
-}
-
-bool DecodeVariantArray(CborValue* it, Variant* out) {
-  CborValue elem;
-  if (cbor_value_enter_container(it, &elem) != CborNoError) return false;
-  std::vector<Variant> list;
-  while (!cbor_value_at_end(&elem)) {
-    Variant item;
-    if (!DecodeVariant(&elem, &item)) return false;
-    list.push_back(item);
-  }
-  if (cbor_value_leave_container(it, &elem) != CborNoError) return false;
-  *out = Variant(list);
-  return true;
-}
-
-bool DecodeVariant(CborValue* it, Variant* out) {
-  switch (cbor_value_get_type(it)) {
-    case CborNullType:
-    case CborUndefinedType:
-      *out = Variant::Null();
-      return cbor_value_advance(it) == CborNoError;
-    case CborBooleanType: {
-      bool b = false;
-      if (cbor_value_get_boolean(it, &b) != CborNoError) return false;
-      *out = Variant::FromBool(b);
-      return cbor_value_advance(it) == CborNoError;
-    }
-    case CborIntegerType: {
-      int64_t n = 0;
-      if (cbor_value_get_int64(it, &n) != CborNoError) return false;
-      *out = Variant::FromInt64(n);
-      return cbor_value_advance(it) == CborNoError;
-    }
-    // Each width has its own accessor. cbor_value_get_double on a float or a
-    // half is not a widening read -- the encoder picks the narrowest form that
-    // holds the value exactly, so 1.5 arrives as a half and came back 0.0.
-    case CborDoubleType: {
-      double d = 0;
-      if (cbor_value_get_double(it, &d) != CborNoError) return false;
-      *out = Variant::FromDouble(d);
-      return cbor_value_advance(it) == CborNoError;
-    }
-    case CborFloatType: {
-      float f = 0;
-      if (cbor_value_get_float(it, &f) != CborNoError) return false;
-      *out = Variant::FromDouble(static_cast<double>(f));
-      return cbor_value_advance(it) == CborNoError;
-    }
-    case CborHalfFloatType: {
-      float f = 0;
-      if (cbor_value_get_half_float_as_float(it, &f) != CborNoError) {
-        return false;
-      }
-      *out = Variant::FromDouble(static_cast<double>(f));
-      return cbor_value_advance(it) == CborNoError;
-    }
-    case CborTextStringType: {
-      char* buf = nullptr;
-      size_t len = 0;
-      if (cbor_value_dup_text_string(it, &buf, &len, it) != CborNoError) {
-        return false;
-      }
-      // FromMutableString copies; the SDK holds it after this returns and the
-      // buffer here does not outlive the call.
-      *out = Variant::FromMutableString(std::string(buf, len));
-      std::free(buf);
-      return true;
-    }
-    case CborByteStringType: {
-      uint8_t* buf = nullptr;
-      size_t len = 0;
-      if (cbor_value_dup_byte_string(it, &buf, &len, it) != CborNoError) {
-        return false;
-      }
-      *out = Variant::FromMutableBlob(buf, len);
-      std::free(buf);
-      return true;
-    }
-    case CborArrayType:
-      return DecodeVariantArray(it, out);
-    case CborMapType:
-      return DecodeVariantMap(it, out);
-    default:
-      return false;
-  }
-}
-
-bool ParseVariant(const uint8_t* cbor, size_t len, Variant* out) {
-  CborParser parser;
-  CborValue it;
-  if (cbor_parser_init(cbor, len, 0, &parser, &it) != CborNoError) {
-    return false;
-  }
-  return DecodeVariant(&it, out);
-}
-
-bool ParseVariantMap(const uint8_t* cbor, size_t len,
-                     std::map<std::string, Variant>* out) {
-  Variant v;
-  if (!ParseVariant(cbor, len, &v) || !v.is_map()) return false;
-  for (const auto& kv : v.map()) {
-    // Keys are strings here even though a Variant map allows more: every
-    // caller of this is a string-keyed API, and silently stringifying a
-    // non-string key would invent a key nobody wrote.
-    if (!kv.first.is_string()) return false;
-    out->emplace(kv.first.string_value(), kv.second);
-  }
-  return true;
-}
-
-// An upper bound on the order tree: one entry per child, keyed by name.
-size_t EstimateOrderBytes(const firebase::database::DataSnapshot& snap) {
-  constexpr size_t kHeader = 9;
-  size_t n = kHeader;
-  for (const auto& child : snap.children()) {
-    n += kHeader + child.key_string().size() + kHeader;
-    if (child.has_children()) n += EstimateOrderBytes(child);
-  }
-  return n;
-}
-
-bool SerializeOrder(const firebase::database::DataSnapshot& snap,
-                    std::vector<uint8_t>& out) {
-  // Sized from the snapshot, as SerializeVariant is from its value.
-  size_t cap = EstimateOrderBytes(snap);
-  for (int attempt = 0; attempt < 16; ++attempt) {
-    out.assign(cap, 0);
-    CborEncoder enc;
-    cbor_encoder_init(&enc, out.data(), cap, 0);
-    if (EncodeOrder(snap, &enc)) {
-      out.resize(cbor_encoder_get_buffer_size(&enc, out.data()));
-      return true;
-    }
-    cap *= 2;
-  }
-  out.clear();
-  return false;
-}
-
-bool SerializeVariantMap(const std::map<std::string, Variant>& m,
-                         std::vector<uint8_t>& out) {
-  std::map<Variant, Variant> as_variant;
-  for (const auto& kv : m) {
-    as_variant.emplace(Variant::FromMutableString(kv.first), kv.second);
-  }
-  return SerializeVariant(Variant(as_variant), out);
 }
 
 }  // namespace fdb
 
 namespace {
 
-// Frees a posted buffer once the Dart GC is done with it. Registered as the
-// finalizer for every kExternalTypedData message below, so ownership passes to
-// the VM and nothing here may touch the buffer afterwards.
-void SnapshotFinalizer(void* /*isolate_callback_data*/, void* peer) {
-  std::free(peer);
+// --- decode: CBOR -> FieldValue -----------------------------------------
+//
+// Accepts sentinels, unlike the encoder: a write may legitimately contain
+// FieldValue::Delete() or ServerTimestamp(), which is what they are for.
+
+bool DecodeValue(CborValue* it, FieldValue* out);
+
+// Reads a CBOR float of any width.
+//
+// cbor_value_get_double is not a widening read: it answers only for a value
+// the encoder wrote as a double. The encoder picks the narrowest form that
+// holds the value exactly, so 1.5 goes out as a half and comes back through
+// that call as whatever the union happened to hold -- writing 1.5 to a
+// document stored 5.14e-315. The Realtime Database codec had the same bug;
+// this is the same fix in Firestore's own decoder.
+bool ReadCborDouble(CborValue* it, double* out) {
+  switch (cbor_value_get_type(it)) {
+    case CborDoubleType:
+      return cbor_value_get_double(it, out) == CborNoError;
+    case CborFloatType: {
+      float f = 0;
+      if (cbor_value_get_float(it, &f) != CborNoError) return false;
+      *out = static_cast<double>(f);
+      return true;
+    }
+    case CborHalfFloatType: {
+      float f = 0;
+      if (cbor_value_get_half_float_as_float(it, &f) != CborNoError) {
+        return false;
+      }
+      *out = static_cast<double>(f);
+      return true;
+    }
+    case CborIntegerType: {
+      // A whole number the encoder wrote as an integer. Firestore keeps
+      // integers and doubles apart, so this only arises where the ABI has
+      // already said the value is a double: a geopoint's coordinates, or a
+      // double increment of a whole number.
+      int64_t i = 0;
+      if (cbor_value_get_int64(it, &i) != CborNoError) return false;
+      *out = static_cast<double>(i);
+      return true;
+    }
+    default:
+      return false;
+  }
 }
 
-void PostSnapshot(Dart_Port_DL port, int64_t seq,
-                  const std::vector<uint8_t>& payload,
-                  const std::vector<uint8_t>& order = {}) {
-  const size_t total =
-      sizeof(FdbSnapshotHeader) + payload.size() + order.size();
-  auto* buf = static_cast<uint8_t*>(std::malloc(total));
-  if (buf == nullptr) {
-    return;
+bool DecodeMap(CborValue* it, MapFieldValue* out) {
+  CborValue entry;
+  if (cbor_value_enter_container(it, &entry) != CborNoError) return false;
+  while (!cbor_value_at_end(&entry)) {
+    if (!cbor_value_is_text_string(&entry)) return false;
+    char* key = nullptr;
+    size_t key_len = 0;
+    if (cbor_value_dup_text_string(&entry, &key, &key_len, &entry) !=
+        CborNoError) {
+      return false;
+    }
+    FieldValue value;
+    const bool ok = DecodeValue(&entry, &value);
+    if (ok) out->emplace(std::string(key, key_len), std::move(value));
+    std::free(key);
+    if (!ok) return false;
   }
+  return cbor_value_leave_container(it, &entry) == CborNoError;
+}
+
+// A tagged item: the tag says which Firestore type the payload describes.
+bool DecodeTagged(CborValue* it, FieldValue* out) {
+  CborTag tag = 0;
+  if (cbor_value_get_tag(it, &tag) != CborNoError) return false;
+  if (cbor_value_advance_fixed(it) != CborNoError) return false;
+
+  switch (tag) {
+    case FDB_CBOR_TAG_DELETE:
+      *out = FieldValue::Delete();
+      return cbor_value_advance(it) == CborNoError;
+    case FDB_CBOR_TAG_SERVER_TIMESTAMP:
+      *out = FieldValue::ServerTimestamp();
+      return cbor_value_advance(it) == CborNoError;
+    case FDB_CBOR_TAG_TIMESTAMP:
+    case FDB_CBOR_TAG_GEOPOINT: {
+      if (!cbor_value_is_array(it)) return false;
+      CborValue pair;
+      if (cbor_value_enter_container(it, &pair) != CborNoError) return false;
+      double a = 0, b = 0;
+      int64_t ia = 0, ib = 0;
+      if (tag == FDB_CBOR_TAG_TIMESTAMP) {
+        if (cbor_value_get_int64(&pair, &ia) != CborNoError ||
+            cbor_value_advance(&pair) != CborNoError ||
+            cbor_value_get_int64(&pair, &ib) != CborNoError ||
+            cbor_value_advance(&pair) != CborNoError) {
+          return false;
+        }
+        *out = FieldValue::Timestamp(
+            firebase::Timestamp(ia, static_cast<int32_t>(ib)));
+      } else {
+        if (!ReadCborDouble(&pair, &a) ||
+            cbor_value_advance(&pair) != CborNoError ||
+            !ReadCborDouble(&pair, &b) ||
+            cbor_value_advance(&pair) != CborNoError) {
+          return false;
+        }
+        *out = FieldValue::GeoPoint(firebase::firestore::GeoPoint(a, b));
+      }
+      return cbor_value_leave_container(it, &pair) == CborNoError;
+    }
+    case FDB_CBOR_TAG_REFERENCE: {
+      char* path = nullptr;
+      size_t len = 0;
+      if (cbor_value_dup_text_string(it, &path, &len, it) != CborNoError) {
+        return false;
+      }
+      *out = FieldValue::Reference(
+          g_firestore->Document(std::string(path, len)));
+      std::free(path);
+      return true;
+    }
+    // The payload is a one-element array rather than a bare number: Dart's
+    // CBOR package drops tags when it normalizes an integer to a small int, so
+    // a tagged bare int would arrive here untagged.
+    case FDB_CBOR_TAG_INCREMENT_INT:
+    case FDB_CBOR_TAG_INCREMENT_DOUBLE: {
+      if (!cbor_value_is_array(it)) return false;
+      CborValue elem;
+      if (cbor_value_enter_container(it, &elem) != CborNoError) return false;
+      if (tag == FDB_CBOR_TAG_INCREMENT_INT) {
+        int64_t by = 0;
+        if (cbor_value_get_int64(&elem, &by) != CborNoError) return false;
+        // Increment(), not IntegerIncrement(): the typed entry points are
+        // private, reached through the public template.
+        *out = FieldValue::Increment(by);
+      } else {
+        double by = 0;
+        if (!ReadCborDouble(&elem, &by)) return false;
+        *out = FieldValue::Increment(by);
+      }
+      if (cbor_value_advance(&elem) != CborNoError) return false;
+      return cbor_value_leave_container(it, &elem) == CborNoError;
+    }
+    case FDB_CBOR_TAG_ARRAY_UNION:
+    case FDB_CBOR_TAG_ARRAY_REMOVE: {
+      if (!cbor_value_is_array(it)) return false;
+      CborValue elem;
+      if (cbor_value_enter_container(it, &elem) != CborNoError) return false;
+      std::vector<FieldValue> items;
+      while (!cbor_value_at_end(&elem)) {
+        FieldValue v;
+        if (!DecodeValue(&elem, &v)) return false;
+        items.push_back(std::move(v));
+      }
+      *out = tag == FDB_CBOR_TAG_ARRAY_UNION
+                 ? FieldValue::ArrayUnion(std::move(items))
+                 : FieldValue::ArrayRemove(std::move(items));
+      return cbor_value_leave_container(it, &elem) == CborNoError;
+    }
+    default:
+      // An unknown tag is a message this build does not understand. Refusing
+      // beats writing the payload without the meaning its tag carried.
+      return false;
+  }
+}
+
+bool DecodeValue(CborValue* it, FieldValue* out) {
+  if (cbor_value_is_tag(it)) return DecodeTagged(it, out);
+
+  switch (cbor_value_get_type(it)) {
+    case CborNullType:
+      *out = FieldValue::Null();
+      return cbor_value_advance_fixed(it) == CborNoError;
+    case CborBooleanType: {
+      bool b = false;
+      if (cbor_value_get_boolean(it, &b) != CborNoError) return false;
+      *out = FieldValue::Boolean(b);
+      return cbor_value_advance_fixed(it) == CborNoError;
+    }
+    case CborIntegerType: {
+      int64_t i = 0;
+      if (cbor_value_get_int64(it, &i) != CborNoError) return false;
+      *out = FieldValue::Integer(i);
+      return cbor_value_advance_fixed(it) == CborNoError;
+    }
+    case CborDoubleType:
+    case CborFloatType:
+    case CborHalfFloatType: {
+      double d = 0;
+      if (!ReadCborDouble(it, &d)) return false;
+      *out = FieldValue::Double(d);
+      return cbor_value_advance_fixed(it) == CborNoError;
+    }
+    case CborTextStringType: {
+      char* s = nullptr;
+      size_t len = 0;
+      if (cbor_value_dup_text_string(it, &s, &len, it) != CborNoError) {
+        return false;
+      }
+      *out = FieldValue::String(std::string(s, len));
+      std::free(s);
+      return true;
+    }
+    case CborByteStringType: {
+      uint8_t* b = nullptr;
+      size_t len = 0;
+      if (cbor_value_dup_byte_string(it, &b, &len, it) != CborNoError) {
+        return false;
+      }
+      *out = FieldValue::Blob(b, len);
+      std::free(b);
+      return true;
+    }
+    case CborArrayType: {
+      CborValue elem;
+      if (cbor_value_enter_container(it, &elem) != CborNoError) return false;
+      std::vector<FieldValue> items;
+      while (!cbor_value_at_end(&elem)) {
+        FieldValue v;
+        if (!DecodeValue(&elem, &v)) return false;
+        items.push_back(std::move(v));
+      }
+      *out = FieldValue::Array(std::move(items));
+      return cbor_value_leave_container(it, &elem) == CborNoError;
+    }
+    case CborMapType: {
+      MapFieldValue m;
+      if (!DecodeMap(it, &m)) return false;
+      *out = FieldValue::Map(std::move(m));
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+
+// --- Queries ---------------------------------------------------------------
+//
+// A query arrives as one CBOR map describing what to run, rather than as a
+// chain of ABI calls:
+//
+//   {"where":   [[field, op, value], ...],
+//    "orderBy": [[field, "asc"|"desc"], ...],
+//    "limit": n, "limitToLast": n}
+//
+// One call instead of one per clause. A query is a value; building it across
+// calls would need per-query state here, and a handle to leak when a caller
+// goes away mid-build. Values inside `where` use the same tagged encoding as
+// documents, so filtering on a timestamp or geopoint needs nothing extra.
+// The spec names the document id "__name__", as the wire protocol does. The
+// SDK spells it as a FieldPath rather than a name, and reading it as a dotted
+// path would filter on a field nobody has.
+bool IsDocumentId(const std::string& field) { return field == "__name__"; }
+
+bool ApplyWhere(Query* q, const std::string& field, const std::string& op,
+                const FieldValue& v) {
+  if (IsDocumentId(field)) {
+    const FieldPath path = FieldPath::DocumentId();
+    if (op == "==") {
+      *q = q->WhereEqualTo(path, v);
+      return true;
+    }
+    if (op == "in") {
+      if (!v.is_array()) return false;
+      *q = q->WhereIn(path, v.array_value());
+      return true;
+    }
+    // The rest are legal on __name__ in the protocol but are not what a
+    // cursor needs, and binding them untested would be a guess.
+    return false;
+  }
+  if (op == "==") {
+    *q = q->WhereEqualTo(field, v);
+  } else if (op == "!=") {
+    *q = q->WhereNotEqualTo(field, v);
+  } else if (op == "<") {
+    *q = q->WhereLessThan(field, v);
+  } else if (op == "<=") {
+    *q = q->WhereLessThanOrEqualTo(field, v);
+  } else if (op == ">") {
+    *q = q->WhereGreaterThan(field, v);
+  } else if (op == ">=") {
+    *q = q->WhereGreaterThanOrEqualTo(field, v);
+  } else if (op == "array-contains") {
+    *q = q->WhereArrayContains(field, v);
+  } else if (op == "array-contains-any") {
+    if (!v.is_array()) return false;
+    *q = q->WhereArrayContainsAny(field, v.array_value());
+  } else if (op == "in") {
+    if (!v.is_array()) return false;
+    *q = q->WhereIn(field, v.array_value());
+  } else if (op == "not-in") {
+    if (!v.is_array()) return false;
+    *q = q->WhereNotIn(field, v.array_value());
+  } else {
+    // An operator this ABI does not know is refused, not dropped: a filter
+    // silently ignored returns more documents than were asked for, and that
+    // reads as data rather than as an error.
+    return false;
+  }
+  return true;
+}
+
+bool ReadText(CborValue* it, std::string* out) {
+  if (!cbor_value_is_text_string(it)) return false;
+  char* buf = nullptr;
+  size_t len = 0;
+  if (cbor_value_dup_text_string(it, &buf, &len, it) != CborNoError) {
+    return false;
+  }
+  out->assign(buf, len);
+  std::free(buf);
+  return true;
+}
+
+// One [field, op, value] triple.
+bool ApplyWhereClause(CborValue* clause, Query* q) {
+  CborValue it;
+  if (cbor_value_enter_container(clause, &it) != CborNoError) return false;
+  std::string field;
+  std::string op;
+  FieldValue value;
+  if (!ReadText(&it, &field)) return false;
+  if (!ReadText(&it, &op)) return false;
+  if (!DecodeValue(&it, &value)) return false;
+  return ApplyWhere(q, field, op, value);
+}
+
+// One [field, "asc"|"desc"] pair.
+bool ApplyOrderClause(CborValue* clause, Query* q) {
+  CborValue it;
+  if (cbor_value_enter_container(clause, &it) != CborNoError) return false;
+  std::string field;
+  std::string dir;
+  if (!ReadText(&it, &field)) return false;
+  if (!ReadText(&it, &dir)) return false;
+  if (dir != "asc" && dir != "desc") return false;
+  const Query::Direction direction = dir == "desc"
+                                         ? Query::Direction::kDescending
+                                         : Query::Direction::kAscending;
+  *q = IsDocumentId(field) ? q->OrderBy(FieldPath::DocumentId(), direction)
+                           : q->OrderBy(field, direction);
+  return true;
+}
+
+// A cursor: the values marking where a page starts or ends, one per orderBy
+// clause. Firestore requires that correspondence, and rejects a mismatch
+// itself rather than guessing which ordering a value belongs to.
+bool ReadCursorValues(CborValue* array, std::vector<FieldValue>* out) {
+  if (!cbor_value_is_array(array)) return false;
+  CborValue elem;
+  if (cbor_value_enter_container(array, &elem) != CborNoError) return false;
+  while (!cbor_value_at_end(&elem)) {
+    FieldValue v;
+    if (!DecodeValue(&elem, &v)) return false;
+    out->push_back(v);
+  }
+  return true;
+}
+
+bool ApplyClauseArray(CborValue* array, bool (*apply)(CborValue*, Query*),
+                      Query* q) {
+  if (!cbor_value_is_array(array)) return false;
+  CborValue elem;
+  if (cbor_value_enter_container(array, &elem) != CborNoError) return false;
+  while (!cbor_value_at_end(&elem)) {
+    if (!cbor_value_is_array(&elem)) return false;
+    CborValue clause = elem;
+    if (!apply(&clause, q)) return false;
+    if (cbor_value_advance(&elem) != CborNoError) return false;
+  }
+  return true;
+}
+
+// The documents of a result, each with the id a caller needs to address it
+// again. A bare list of bodies would be unusable: nothing in a document says
+// where it lives.
+bool SerializeQueryResult(const firebase::firestore::QuerySnapshot& snap,
+                          std::vector<uint8_t>& out) {
+  size_t capacity = 4096;
+  for (int attempt = 0; attempt < 12; ++attempt) {
+    out.assign(capacity, 0);
+    CborEncoder enc;
+    cbor_encoder_init(&enc, out.data(), out.size(), 0);
+    CborEncoder array;
+    cbor_encoder_create_array(&enc, &array, CborIndefiniteLength);
+    for (const DocumentSnapshot& doc : snap.documents()) {
+      CborEncoder entry;
+      cbor_encoder_create_map(&array, &entry, CborIndefiniteLength);
+      cbor_encode_text_stringz(&entry, "id");
+      cbor_encode_text_stringz(&entry, doc.id().c_str());
+      cbor_encode_text_stringz(&entry, "path");
+      cbor_encode_text_stringz(&entry, doc.reference().path().c_str());
+      cbor_encode_text_stringz(&entry, "data");
+      EncodeMap(doc.GetData(), &entry);
+      cbor_encoder_close_container(&array, &entry);
+    }
+    cbor_encoder_close_container(&enc, &array);
+
+    const size_t extra = cbor_encoder_get_extra_bytes_needed(&enc);
+    if (extra == 0) {
+      out.resize(cbor_encoder_get_buffer_size(&enc, out.data()));
+      return true;
+    }
+    // Grow and retry, for the reason the other encoders do: measuring against
+    // a null buffer needs the walk to continue past the first overflow, and
+    // ours stop at it.
+    capacity = (capacity + extra) * 2;
+  }
+  out.clear();
+  return false;
+}
+
+}  // namespace
+
+namespace {
+
+// Posts [ok, code, message] — the shape Auth already uses for a completed
+// operation, so the Dart side awaits it the same way.
+void PostOutcome(Dart_Port_DL port, bool ok, int code,
+                 const std::string& message) {
+  Dart_CObject c_ok{}, c_code{}, c_msg{};
+  c_ok.type = Dart_CObject_kBool;
+  c_ok.value.as_bool = ok;
+  c_code.type = Dart_CObject_kInt64;
+  c_code.value.as_int64 = code;
+  c_msg.type = Dart_CObject_kString;
+  c_msg.value.as_string = const_cast<char*>(message.c_str());
+
+  Dart_CObject* items[3] = {&c_ok, &c_code, &c_msg};
+  Dart_CObject arr{};
+  arr.type = Dart_CObject_kArray;
+  arr.value.as_array.length = 3;
+  arr.value.as_array.values = items;
+  Dart_PostCObject_DL(port, &arr);
+}
+
+// Posts a document as a snapshot buffer: the same header the Database uses,
+// then the CBOR map. An empty payload means the document does not exist,
+// which is distinct from an empty document.
+void PostDocument(Dart_Port_DL port, int64_t seq,
+                  const std::vector<uint8_t>& payload) {
+  const size_t total = sizeof(FdbSnapshotHeader) + payload.size();
+  auto* buf = static_cast<uint8_t*>(std::malloc(total));
+  if (buf == nullptr) return;
 
   FdbSnapshotHeader header{};
   header.magic = 0xFDB50000u;
   header.version = 1u;
   header.seq = seq;
   header.value_len = static_cast<uint32_t>(payload.size());
-  header.order_len = static_cast<uint32_t>(order.size());
   header.posted_ns = fdb_now_ns();
   std::memcpy(buf, &header, sizeof(header));
   if (!payload.empty()) {
     std::memcpy(buf + sizeof(header), payload.data(), payload.size());
-  }
-  if (!order.empty()) {
-    std::memcpy(buf + sizeof(header) + payload.size(), order.data(),
-                order.size());
   }
 
   Dart_CObject obj{};
@@ -432,785 +625,713 @@ void PostSnapshot(Dart_Port_DL port, int64_t seq,
   obj.value.as_external_typed_data.length = static_cast<intptr_t>(total);
   obj.value.as_external_typed_data.data = buf;
   obj.value.as_external_typed_data.peer = buf;
-  obj.value.as_external_typed_data.callback = SnapshotFinalizer;
+  obj.value.as_external_typed_data.callback =
+      [](void*, void* peer) { std::free(peer); };
   Dart_PostCObject_DL(port, &obj);
 }
 
-// Serializes on the SDK's thread and posts from it. The listener outlives the
-// query by construction: it is owned by the map below and only destroyed by
-// fdb_unlisten, after RemoveValueListener has returned.
-class PortValueListener : public ValueListener {
- public:
-  PortValueListener(Dart_Port_DL port, firebase::database::Query query)
-      : port_(port), query_(std::move(query)) {}
-
-  void OnValueChanged(const DataSnapshot& snapshot) override {
-    std::vector<uint8_t> payload;
-    if (!fdb::SerializeVariant(snapshot.value(), payload)) {
-      // Encoding cannot fail for what Database returns, but dropping the
-      // snapshot beats posting a truncated one the decoder would reject.
-      return;
-    }
-    // The value is a Variant map, which the SDK sorts by key. A query's
-    // ordering lives only in children(), so it travels beside the value.
-    std::vector<uint8_t> order;
-    if (!fdb::SerializeOrder(snapshot, order)) order.clear();
-    PostSnapshot(port_, ++seq_, payload, order);
-  }
-
-  void OnCancelled(const Error& error, const char* message) override {
-    // Carry the reason, not just the fact. A canceled listener is nearly
-    // always a rules or connectivity problem, and an error with no code or
-    // message leaves the caller guessing at which.
-    std::string text = "error " + std::to_string(static_cast<int>(error));
-    if (message != nullptr && *message != '\0') {
-      text += ": ";
-      text += message;
-    }
-    std::vector<uint8_t> payload;
-    if (!fdb::SerializeVariant(Variant(text.c_str()), payload)) return;
-    PostSnapshot(port_, -1, payload);
-  }
-
-  firebase::database::Query& query() { return query_; }
-
- private:
-  Dart_Port_DL port_;
-  firebase::database::Query query_;
-  int64_t seq_ = 0;
-};
-
-std::map<int64_t, std::unique_ptr<PortValueListener>> g_listeners;
-
-// Child events, which a value listener cannot express: it reports the whole
-// node on every change, so a caller cannot tell which child moved, or see a
-// removal at all once the node is gone.
-//
-// Each event is a CBOR map: {"type", "key", "prev", "value"}. `prev` is the
-// key of the sibling before this one in the query's ordering, and is null for
-// the first -- that is what lets a caller keep an ordered list without
-// re-reading the node.
-class PortChildListener : public firebase::database::ChildListener {
- public:
-  PortChildListener(Dart_Port_DL port, firebase::database::Query query)
-      : port_(port), query_(std::move(query)) {}
-
-  void OnChildAdded(const DataSnapshot& snapshot,
-                    const char* previous) override {
-    Post(0, snapshot, previous);
-  }
-  void OnChildChanged(const DataSnapshot& snapshot,
-                      const char* previous) override {
-    Post(1, snapshot, previous);
-  }
-  void OnChildMoved(const DataSnapshot& snapshot,
-                    const char* previous) override {
-    Post(2, snapshot, previous);
-  }
-  void OnChildRemoved(const DataSnapshot& snapshot) override {
-    Post(3, snapshot, nullptr);
-  }
-
-  void OnCancelled(const Error& error, const char* message) override {
-    std::string text = "error " + std::to_string(static_cast<int>(error));
-    if (message != nullptr && *message != '\0') {
-      text += ": ";
-      text += message;
-    }
-    std::vector<uint8_t> payload;
-    if (!fdb::SerializeVariant(Variant(text.c_str()), payload)) return;
-    PostSnapshot(port_, -1, payload);
-  }
-
-  firebase::database::Query& query() { return query_; }
-
- private:
-  void Post(int64_t type, const DataSnapshot& snapshot, const char* previous) {
-    std::map<std::string, Variant> event;
-    event["type"] = Variant(type);
-    // Copies, rather than Variant::MutableStringFromStaticString, which
-    // stores the pointer without owning it. These are serialized inside this
-    // call so an alias would survive, but the two constructors differ by a
-    // name alone and the aliasing one has already cost this project a bug.
-    event["key"] =
-        Variant(std::string(snapshot.key() == nullptr ? "" : snapshot.key()));
-    // The SDK says "no predecessor" with an empty string, not a null pointer.
-    // Passing that through gives Dart a child whose previous sibling is a key
-    // that cannot exist, rather than one that is first.
-    event["prev"] = (previous == nullptr || *previous == '\0')
-                        ? Variant::Null()
-                        : Variant(std::string(previous));
-    event["value"] = snapshot.value();
-
-    std::vector<uint8_t> payload;
-    if (!fdb::SerializeVariantMap(event, payload)) return;
-    PostSnapshot(port_, ++seq_, payload);
-  }
-
-  Dart_Port_DL port_;
-  firebase::database::Query query_;
-  int64_t seq_ = 0;
-};
-
-std::map<int64_t, std::unique_ptr<PortChildListener>> g_child_listeners;
-
-// Shared by fdb_db_listen and fdb_db_query_listen, which put their listeners
-// in the same map: two counters would hand out the same handle twice, and
-// emplace drops the second rather than replacing it, so a listener would go
-// quiet with nothing to say it had.
-int64_t g_next_value_handle = 1;
-// Child handles start far below the error codes. Numbering them -1, -2, -3
-// would make the first three listeners indistinguishable from the -1, -2 and
-// -3 this ABI returns for a failure, and the caller would treat a working
-// listener as a refusal.
-int64_t g_next_child_handle = 1000;
-
+// Decodes a CBOR map into the document body a write applies.
 }  // namespace
+
+namespace fdb {
+
+bool ParseDocumentCbor(const uint8_t* cbor, size_t len, MapFieldValue* out) {
+  CborParser parser;
+  CborValue it;
+  if (cbor_parser_init(cbor, len, 0, &parser, &it) != CborNoError) return false;
+  if (!cbor_value_is_map(&it)) return false;
+  return DecodeMap(&it, out);
+}
+
+}  // namespace fdb
 
 extern "C" {
 
-FDB_EXPORT int64_t fdb_app_init(const char* app_id, const char* api_key,
-                                const char* project_id,
-                                const char* database_url,
-                                const char* storage_bucket) {
+FDB_EXPORT int32_t fdb_have_firestore(void) { return 1; }
+
+// Point Firestore at a local emulator. Firestore has no UseEmulator(): the
+// route is a host override with TLS off, and it has to happen before the first
+// operation, because settings are frozen once the client starts.
+FDB_EXPORT int64_t fdb_fs_use_emulator(const char* host, int64_t port) {
   std::lock_guard<std::mutex> lock(g_mutex);
-  if (g_app != nullptr) {
-    return 0;  // already initialized
-  }
-
-  firebase::AppOptions options;
-  options.set_app_id(app_id);
-  options.set_api_key(api_key);
-  options.set_project_id(project_id);
-  // Optional, like the bucket: an app that binds only Auth or Storage has no
-  // database to name, and an empty url is not the same as a default one.
-  if (database_url != nullptr && *database_url != '\0') {
-    options.set_database_url(database_url);
-    g_has_database_url = true;
-  }
-  // Storage derives its bucket from the app, and there is no second chance to
-  // supply one: Storage::GetInstance(app) with no bucket set fails the first
-  // operation with an unknown error rather than at init. Optional, because a
-  // build that binds no Storage has nothing to name.
-  if (storage_bucket != nullptr && *storage_bucket != '\0') {
-    options.set_storage_bucket(storage_bucket);
-  }
-
-  g_app = App::Create(options);
-  if (g_app == nullptr) {
-    return -1;
-  }
-  // The Database is created on first use, not here. Standing one up for an app
-  // that never touches it costs a connection the app did not ask for, and a
-  // Database that cannot reach its backend does not fail quietly -- it was
-  // enough to stall an unrelated anonymous sign-in, because the SDK's
-  // scheduler is shared.
+  if (g_firestore == nullptr) return -1;
+  if (host == nullptr || *host == '\0' || port <= 0 || port > 65535) return -2;
+  firebase::firestore::Settings settings = g_firestore->settings();
+  settings.set_host(std::string(host) + ":" + std::to_string(port));
+  settings.set_ssl_enabled(false);
+  settings.set_persistence_enabled(false);
+  g_firestore->set_settings(settings);
   return 0;
 }
 
-// Caller holds g_mutex.
-static Database* EnsureDatabase() {
-  if (g_database != nullptr) return g_database;
-  if (g_app == nullptr) return nullptr;
-  // Refused here rather than a few frames deeper: without a url the Repo has
-  // nothing to connect to, and the SDK still answers GetInstance with an
-  // instance that accepts calls and never completes them.
-  if (!g_has_database_url) return nullptr;
-  firebase::InitResult init_result;
-  g_database = Database::GetInstance(g_app, &init_result);
-  if (init_result != firebase::kInitResultSuccess) {
-    g_database = nullptr;
-  }
-  return g_database;
-}
-
-// The one App the module shares. Auth signs in on this instance, which is what
-// makes Database see the credential — the SDK routes auth through the App.
-FDB_EXPORT firebase::App* fdb_current_app(void) {
+FDB_EXPORT int64_t fdb_fs_init(void) {
   std::lock_guard<std::mutex> lock(g_mutex);
-  return g_app;
-}
-
-FDB_EXPORT int64_t fdb_db_set_string(const char* path, const char* value) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) {
-    return -1;
+  if (g_firestore != nullptr) return 0;
+  firebase::App* app = fdb_current_app();
+  if (app == nullptr) return -1;
+  firebase::InitResult result;
+  g_firestore = Firestore::GetInstance(app, &result);
+  if (g_firestore == nullptr || result != firebase::kInitResultSuccess) {
+    return -2;
   }
-  // MutableString, not Variant(const char*): that constructor makes a *static*
-  // string variant which stores the pointer without copying, and SetValue is
-  // asynchronous — the caller is free to release the buffer as soon as this
-  // returns, so a static string here is a use-after-free that writes garbage
-  // to the database rather than failing.
-  g_database->GetReference(path).SetValue(
-      Variant::MutableStringFromStaticString(value));
   return 0;
 }
 
-// extern "C++" around the anonymous namespace: these are inside the extern
-// "C" block, where C language linkage suppresses mangling and an anonymous
-// namespace alone does not make a name internal. Without this the helpers are
-// exported under their plain names.
+FDB_EXPORT int64_t fdb_fs_set(const char* doc_path, const uint8_t* cbor,
+                              size_t len, int32_t merge, int64_t port) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (g_firestore == nullptr) return -1;
+  if (doc_path == nullptr || cbor == nullptr) return -2;
+
+  MapFieldValue data;
+  if (!fdb::ParseDocumentCbor(cbor, len, &data)) return -3;
+
+  g_firestore->Document(doc_path)
+      .Set(data, merge != 0 ? SetOptions::Merge() : SetOptions())
+      .OnCompletion([port](const firebase::Future<void>& f) {
+        PostOutcome(static_cast<Dart_Port_DL>(port), f.error() == 0, f.error(),
+                    f.error_message() == nullptr ? "" : f.error_message());
+      });
+  return 0;
+}
+
+// Builds a query from a collection path and a spec. Shared by the one-shot
+// read and the listener, so there is one parser rather than two that can
+// disagree about what a spec means.
+//
+// Caller holds g_mutex. Returns 0, or the negative code the ABI reports.
+// True when the spec asks for a collection group. Read before the query is
+// created, because it decides which query that is -- the main loop below runs
+// after the base exists and could not change it.
+static bool SpecWantsCollectionGroup(const uint8_t* spec, size_t spec_len) {
+  if (spec == nullptr || spec_len == 0) return false;
+  CborParser parser;
+  CborValue map;
+  if (cbor_parser_init(spec, spec_len, 0, &parser, &map) != CborNoError ||
+      !cbor_value_is_map(&map)) {
+    return false;
+  }
+  CborValue entry;
+  if (cbor_value_enter_container(&map, &entry) != CborNoError) return false;
+  while (!cbor_value_at_end(&entry)) {
+    std::string key;
+    if (!ReadText(&entry, &key)) return false;
+    if (key == "collectionGroup") {
+      bool on = false;
+      if (cbor_value_is_boolean(&entry) &&
+          cbor_value_get_boolean(&entry, &on) == CborNoError) {
+        return on;
+      }
+      return false;
+    }
+    if (cbor_value_advance(&entry) != CborNoError) return false;
+  }
+  return false;
+}
+
+static int BuildQuery(const char* collection_path, const uint8_t* spec,
+                      size_t spec_len, Query* out) {
+  // Building a query can throw: the SDK validates field paths and rejects a
+  // malformed one with std::invalid_argument, which crossing this boundary
+  // would abort the process rather than reach Dart. A caller's mistake must
+  // come back as an error code, not as SIGABRT.
+  try {
+    Query query = SpecWantsCollectionGroup(spec, spec_len)
+                      ? g_firestore->CollectionGroup(collection_path)
+                      : g_firestore->Collection(collection_path);
+
+    // An empty spec is a plain collection read. Anything else is applied
+    // before the call goes out: a spec that does not parse must not run as a
+    // weaker query, because the caller would get more documents and no error.
+    if (spec != nullptr && spec_len != 0) {
+      CborParser parser;
+      CborValue map;
+      if (cbor_parser_init(spec, spec_len, 0, &parser, &map) != CborNoError ||
+          !cbor_value_is_map(&map)) {
+        return -3;
+      }
+      CborValue entry;
+      if (cbor_value_enter_container(&map, &entry) != CborNoError) return -3;
+      while (!cbor_value_at_end(&entry)) {
+        std::string key;
+        if (!ReadText(&entry, &key)) return -3;
+        if (key == "where") {
+          if (!ApplyClauseArray(&entry, ApplyWhereClause, &query)) return -3;
+        } else if (key == "orderBy") {
+          if (!ApplyClauseArray(&entry, ApplyOrderClause, &query)) return -3;
+        } else if (key == "startAt" || key == "startAfter" ||
+                   key == "endAt" || key == "endBefore") {
+          std::vector<FieldValue> values;
+          if (!ReadCursorValues(&entry, &values) || values.empty()) return -3;
+          if (key == "startAt") {
+            query = query.StartAt(values);
+          } else if (key == "startAfter") {
+            query = query.StartAfter(values);
+          } else if (key == "endAt") {
+            query = query.EndAt(values);
+          } else {
+            query = query.EndBefore(values);
+          }
+        } else if (key == "collectionGroup") {
+          // Consumed by the pre-pass; skipped here so it is not refused as an
+          // unknown key.
+        } else if (key == "limit" || key == "limitToLast") {
+          int64_t n = 0;
+          if (!cbor_value_is_integer(&entry) ||
+              cbor_value_get_int64(&entry, &n) != CborNoError || n <= 0 ||
+              n > INT32_MAX) {
+            return -3;
+          }
+          query = key == "limit" ? query.Limit(static_cast<int32_t>(n))
+                                 : query.LimitToLast(static_cast<int32_t>(n));
+        } else {
+          // Refused rather than skipped, for the same reason an unknown
+          // operator is: a constraint that quietly does nothing widens the
+          // result.
+          return -3;
+        }
+        if (cbor_value_advance(&entry) != CborNoError) return -3;
+      }
+    }
+    *out = query;
+    return 0;
+  } catch (const std::exception& e) {
+    // -4 rather than -3: the spec parsed, the SDK refused it. A field path
+    // with a '/' or '[' in it lands here.
+    std::fprintf(stderr, "fdb_fs_query: %s\n", e.what());
+    return -4;
+  }
+}
+
+// --- Transactions ----------------------------------------------------------
+//
+// The SDK runs the update function on its own thread and retries it, so the
+// work has to happen there while the user's code lives in Dart. The lambda
+// therefore parks on a condition variable and serves requests from Dart until
+// told to commit:
+//
+//   Dart                            SDK thread (the lambda)
+//   fdb_fs_txn_begin  ------------> starts, posts "attempt n", waits
+//   fdb_fs_txn_get    ------------> wakes, Transaction::Get, posts result, waits
+//   ...                             (Dart buffers its writes meanwhile)
+//   fdb_fs_txn_commit ------------> wakes, applies writes, returns
+//
+// Blocking that thread is safe and is the point: it is the SDK's worker, never
+// Dart's isolate, which stays free to run the handler. A retry re-enters the
+// lambda, which posts another attempt and the handler runs again -- which is
+// why Dart listens to a stream of attempts rather than awaiting one result.
+// extern "C++" around the anonymous namespace: this is inside the extern "C"
+// block, where C language linkage suppresses mangling and an anonymous
+// namespace alone does not make a name internal. Without it g_txns and
+// g_next_txn are exported under those names, and the Realtime Database's
+// transaction state picked the same one -- the link failed with "multiple
+// definition" in the first build that compiled both files.
 extern "C++" {
 namespace {
 
-// Builds a Query from a CBOR spec.
-//
-//   {"orderBy": "child"|"key"|"value"|"priority",
-//    "orderByPath": "a/b",                      -- with orderBy "child"
-//    "startAt": v, "startAtKey": "k",
-//    "endAt":   v, "endAtKey":   "k",
-//    "equalTo": v, "equalToKey": "k",
-//    "limitToFirst": n, "limitToLast": n}
-//
-// A key this does not understand is refused rather than ignored. Ignoring one
-// runs a weaker query that returns more than was asked for and reports no
-// error, which is the failure that is hardest to notice.
-//
-// Order matters: the SDK requires an ordering before a bound, and applying a
-// bound first silently produces a different query.
-bool ApplyQuerySpec(firebase::database::Query* q,
-                    const std::map<std::string, Variant>& spec) {
-  static const char* kKnown[] = {
-      "orderBy", "orderByPath", "startAt", "startAtKey", "endAt",
-      "endAtKey", "equalTo", "equalToKey", "limitToFirst", "limitToLast"};
-  for (const auto& kv : spec) {
-    bool known = false;
-    for (const char* k : kKnown) {
-      if (kv.first == k) { known = true; break; }
-    }
-    if (!known) return false;
+enum class TxnRequest { kNone, kGet, kCommit, kAbort };
+
+struct TxnState {
+  std::mutex m;
+  std::condition_variable cv;
+  TxnRequest req = TxnRequest::kNone;
+  std::string get_path;
+  Dart_Port_DL get_port = 0;
+  std::vector<uint8_t> writes;
+  Transaction* txn = nullptr;
+  int64_t attempt = 0;
+};
+
+std::unordered_map<int64_t, std::shared_ptr<TxnState>> g_txns;
+int64_t g_next_txn = 1;
+
+}  // namespace
+}  // extern "C++"
+
+// Applies the writes Dart buffered. They arrive as one CBOR array of
+// [op, path, data?] rather than one call each: a write that reached the SDK
+// before the handler finished could not be taken back if a later line threw.
+// Templated over the writer: Transaction and WriteBatch have the same
+// Set/Update/Delete surface, and two copies could drift on what an op means.
+// extern "C++" because this block has C linkage and a template cannot.
+extern "C++" template <typename Writer>
+bool ApplyWrites(Writer& txn, const std::vector<uint8_t>& cbor) {
+  if (cbor.empty()) return true;
+  CborParser parser;
+  CborValue array;
+  if (cbor_parser_init(cbor.data(), cbor.size(), 0, &parser, &array) !=
+          CborNoError ||
+      !cbor_value_is_array(&array)) {
+    return false;
   }
+  CborValue entry;
+  if (cbor_value_enter_container(&array, &entry) != CborNoError) return false;
+  while (!cbor_value_at_end(&entry)) {
+    CborValue item;
+    if (!cbor_value_is_array(&entry) ||
+        cbor_value_enter_container(&entry, &item) != CborNoError) {
+      return false;
+    }
+    std::string op;
+    std::string path;
+    if (!ReadText(&item, &op) || !ReadText(&item, &path)) return false;
 
-  auto find = [&spec](const char* key) -> const Variant* {
-    auto it = spec.find(key);
-    return it == spec.end() ? nullptr : &it->second;
-  };
-
-  if (const Variant* order = find("orderBy")) {
-    if (!order->is_string()) return false;
-    const std::string by = order->string_value();
-    if (by == "child") {
-      const Variant* path = find("orderByPath");
-      if (path == nullptr || !path->is_string()) return false;
-      *q = q->OrderByChild(path->string_value());
-    } else if (by == "key") {
-      *q = q->OrderByKey();
-    } else if (by == "value") {
-      *q = q->OrderByValue();
-    } else if (by == "priority") {
-      *q = q->OrderByPriority();
+    if (op == "delete") {
+      txn.Delete(g_firestore->Document(path));
+    } else if (op == "set" || op == "merge") {
+      MapFieldValue data;
+      if (!DecodeMap(&item, &data)) return false;
+      txn.Set(g_firestore->Document(path), data,
+              op == "merge" ? firebase::firestore::SetOptions::Merge()
+                            : firebase::firestore::SetOptions());
+    } else if (op == "update") {
+      MapFieldValue data;
+      if (!DecodeMap(&item, &data)) return false;
+      txn.Update(g_firestore->Document(path), data);
     } else {
       return false;
     }
-  } else if (find("orderByPath") != nullptr) {
-    // A path with nothing to order by is a spec that means nothing.
-    return false;
-  }
-
-  // equalTo is StartAt and EndAt at once; combining it with either is a
-  // contradiction rather than a narrowing.
-  const Variant* equal = find("equalTo");
-  if (equal != nullptr && (find("startAt") || find("endAt"))) return false;
-
-  if (equal != nullptr) {
-    const Variant* key = find("equalToKey");
-    if (key != nullptr) {
-      if (!key->is_string()) return false;
-      *q = q->EqualTo(*equal, key->string_value());
-    } else {
-      *q = q->EqualTo(*equal);
-    }
-  }
-  if (const Variant* start = find("startAt")) {
-    const Variant* key = find("startAtKey");
-    if (key != nullptr) {
-      if (!key->is_string()) return false;
-      *q = q->StartAt(*start, key->string_value());
-    } else {
-      *q = q->StartAt(*start);
-    }
-  }
-  if (const Variant* end = find("endAt")) {
-    const Variant* key = find("endAtKey");
-    if (key != nullptr) {
-      if (!key->is_string()) return false;
-      *q = q->EndAt(*end, key->string_value());
-    } else {
-      *q = q->EndAt(*end);
-    }
-  }
-
-  const Variant* first = find("limitToFirst");
-  const Variant* last = find("limitToLast");
-  // The SDK keeps whichever was applied last rather than reporting the
-  // conflict, so asking for both is refused here.
-  if (first != nullptr && last != nullptr) return false;
-  if (first != nullptr) {
-    if (!first->is_int64() || first->int64_value() <= 0) return false;
-    *q = q->LimitToFirst(static_cast<size_t>(first->int64_value()));
-  }
-  if (last != nullptr) {
-    if (!last->is_int64() || last->int64_value() <= 0) return false;
-    *q = q->LimitToLast(static_cast<size_t>(last->int64_value()));
+    if (cbor_value_advance(&entry) != CborNoError) return false;
   }
   return true;
 }
 
-}  // namespace
-}  // extern "C++"
-
-// The value operations, taking a Variant rather than a string.
-//
-// fdb_db_set_string stays: it is what the transport benchmark measures, and it
-// is fire-and-forget by design there. Everything below answers on a port,
-// because an app that cannot tell whether a write landed has no way to retry.
-
-FDB_EXPORT int64_t fdb_db_set(const char* path, const uint8_t* cbor,
-                              size_t len, int64_t port) {
+FDB_EXPORT int64_t fdb_fs_query(const char* collection_path,
+                               const uint8_t* spec, size_t spec_len,
+                               int64_t port) {
   std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
-  Variant value;
-  if (!fdb::ParseVariant(cbor, len, &value)) return -3;
-  g_database->GetReference(path).SetValue(value).OnCompletion(
-      [port](const firebase::Future<void>& f) {
-        fdb_post_outcome(port, f.error() == 0 ? 1 : 0, f.error(),
-                         f.error_message() == nullptr ? "" : f.error_message());
-      });
-  return 0;
-}
+  if (g_firestore == nullptr) return -1;
+  if (collection_path == nullptr) return -2;
 
-// UpdateChildren, which writes the named children and leaves the rest alone.
-// Not the same as SetValue with a partial map, which would delete everything
-// not mentioned.
-FDB_EXPORT int64_t fdb_db_update(const char* path, const uint8_t* cbor,
-                                 size_t len, int64_t port) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
-  Variant value;
-  if (!fdb::ParseVariant(cbor, len, &value)) return -3;
-  // The SDK asserts on a non-map here rather than returning an error, so it is
-  // refused before it gets there.
-  if (!value.is_map()) return -4;
-  g_database->GetReference(path).UpdateChildren(value).OnCompletion(
-      [port](const firebase::Future<void>& f) {
-        fdb_post_outcome(port, f.error() == 0 ? 1 : 0, f.error(),
-                         f.error_message() == nullptr ? "" : f.error_message());
-      });
-  return 0;
-}
+  Query query = g_firestore->Collection("_");
+  const int rc = BuildQuery(collection_path, spec, spec_len, &query);
+  if (rc != 0) return rc;
 
-// A priority orders a node's siblings. It is written with the value, because
-// the SDK writes both in one operation -- setting a value and then a priority
-// is two writes, and a listener sees the node between them with the old order.
-FDB_EXPORT int64_t fdb_db_set_with_priority(const char* path,
-                                            const uint8_t* cbor, size_t len,
-                                            const uint8_t* prio, size_t prio_len,
-                                            int64_t port) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
-  Variant value;
-  Variant priority;
-  if (!fdb::ParseVariant(cbor, len, &value)) return -3;
-  if (!fdb::ParseVariant(prio, prio_len, &priority)) return -3;
-  g_database->GetReference(path)
-      .SetValueAndPriority(value, priority)
-      .OnCompletion([port](const firebase::Future<void>& f) {
-        fdb_post_outcome(port, f.error() == 0 ? 1 : 0, f.error(),
-                         f.error_message() == nullptr ? "" : f.error_message());
-      });
-  return 0;
-}
-
-FDB_EXPORT int64_t fdb_db_set_priority(const char* path, const uint8_t* prio,
-                                       size_t prio_len, int64_t port) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
-  Variant priority;
-  if (!fdb::ParseVariant(prio, prio_len, &priority)) return -3;
-  g_database->GetReference(path).SetPriority(priority).OnCompletion(
-      [port](const firebase::Future<void>& f) {
-        fdb_post_outcome(port, f.error() == 0 ? 1 : 0, f.error(),
-                         f.error_message() == nullptr ? "" : f.error_message());
-      });
-  return 0;
-}
-
-// Keeps a location synced even with no listener attached, so a later read is
-// served from cache rather than the network. Nothing completes: the SDK takes
-// the instruction and applies it to the sync tree.
-FDB_EXPORT int64_t fdb_db_keep_synced(const char* path, const uint8_t* spec,
-                                      size_t spec_len, int32_t keep) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
-  firebase::database::Query query = g_database->GetReference(path);
-  if (spec != nullptr && spec_len > 0) {
-    std::map<std::string, Variant> parsed;
-    if (!fdb::ParseVariantMap(spec, spec_len, &parsed)) return -3;
-    if (!ApplyQuerySpec(&query, parsed)) return -3;
-  }
-  query.SetKeepSynchronized(keep != 0);
-  return 0;
-}
-
-// Drops writes that have not reached the server. Their futures fail, which is
-// the point: an app that gave up on a write needs to hear that it will not
-// land rather than wait forever.
-FDB_EXPORT int64_t fdb_db_purge_outstanding_writes(void) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  g_database->PurgeOutstandingWrites();
-  return 0;
-}
-
-FDB_EXPORT int64_t fdb_db_remove(const char* path, int64_t port) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
-  g_database->GetReference(path).RemoveValue().OnCompletion(
-      [port](const firebase::Future<void>& f) {
-        fdb_post_outcome(port, f.error() == 0 ? 1 : 0, f.error(),
-                         f.error_message() == nullptr ? "" : f.error_message());
-      });
-  return 0;
-}
-
-// What the server should do if this client goes away without saying goodbye.
-//
-// Registered with the server now and executed by it on disconnect, which is
-// the only kind of cleanup that survives a device losing power rather than
-// closing down: nothing on the device gets to run at that point.
-//
-// The registration is what completes here. Whether the server later carries it
-// out is not something a client can observe, and reporting the registration as
-// though it were the write would claim more than is known.
-FDB_EXPORT int64_t fdb_db_on_disconnect_set(const char* path,
-                                            const uint8_t* cbor, size_t len,
-                                            int64_t port) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
-  Variant value;
-  if (!fdb::ParseVariant(cbor, len, &value)) return -3;
-  g_database->GetReference(path).OnDisconnect()->SetValue(value).OnCompletion(
-      [port](const firebase::Future<void>& f) {
-        fdb_post_outcome(port, f.error() == 0 ? 1 : 0, f.error(),
-                         f.error_message() == nullptr ? "" : f.error_message());
-      });
-  return 0;
-}
-
-FDB_EXPORT int64_t fdb_db_on_disconnect_update(const char* path,
-                                               const uint8_t* cbor, size_t len,
-                                               int64_t port) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
-  Variant value;
-  if (!fdb::ParseVariant(cbor, len, &value)) return -3;
-  if (!value.is_map()) return -4;
-  g_database->GetReference(path)
-      .OnDisconnect()
-      ->UpdateChildren(value)
-      .OnCompletion([port](const firebase::Future<void>& f) {
-        fdb_post_outcome(port, f.error() == 0 ? 1 : 0, f.error(),
-                         f.error_message() == nullptr ? "" : f.error_message());
-      });
-  return 0;
-}
-
-FDB_EXPORT int64_t fdb_db_on_disconnect_set_with_priority(
-    const char* path, const uint8_t* cbor, size_t len, const uint8_t* prio,
-    size_t prio_len, int64_t port) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
-  Variant value;
-  Variant priority;
-  if (!fdb::ParseVariant(cbor, len, &value)) return -3;
-  if (!fdb::ParseVariant(prio, prio_len, &priority)) return -3;
-  g_database->GetReference(path)
-      .OnDisconnect()
-      ->SetValueAndPriority(value, priority)
-      .OnCompletion([port](const firebase::Future<void>& f) {
-        fdb_post_outcome(port, f.error() == 0 ? 1 : 0, f.error(),
-                         f.error_message() == nullptr ? "" : f.error_message());
-      });
-  return 0;
-}
-
-FDB_EXPORT int64_t fdb_db_on_disconnect_remove(const char* path,
-                                               int64_t port) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
-  g_database->GetReference(path).OnDisconnect()->RemoveValue().OnCompletion(
-      [port](const firebase::Future<void>& f) {
-        fdb_post_outcome(port, f.error() == 0 ? 1 : 0, f.error(),
-                         f.error_message() == nullptr ? "" : f.error_message());
-      });
-  return 0;
-}
-
-// Drops every registration made for this path, not just the last one.
-FDB_EXPORT int64_t fdb_db_on_disconnect_cancel(const char* path,
-                                               int64_t port) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
-  g_database->GetReference(path).OnDisconnect()->Cancel().OnCompletion(
-      [port](const firebase::Future<void>& f) {
-        fdb_post_outcome(port, f.error() == 0 ? 1 : 0, f.error(),
-                         f.error_message() == nullptr ? "" : f.error_message());
-      });
-  return 0;
-}
-
-// Transactions.
-//
-// The SDK calls the handler on its own thread and wants a decision before that
-// call returns; the handler lives in Dart. So the SDK's thread is parked on a
-// condition variable while the current value goes to Dart, and
-// fdb_db_txn_apply wakes it with the answer. The same shape the Firestore
-// transactions use, for the same reason.
-//
-// The handler is called again for each retry -- the SDK re-runs it when the
-// value changed underneath -- so an attempt number goes with each request, and
-// a Dart handler must be prepared to run more than once.
-// extern "C++" for the same reason as the query helpers above: an anonymous
-// namespace inside extern "C" does not make these internal. firestore_impl.cpp
-// has its own g_next_txn, and the two collided at link time -- but only in a
-// build that compiles both, which a product selection without Firestore does
-// not.
-extern "C++" {
-namespace {
-
-struct DbTxnState {
-  std::mutex m;
-  std::condition_variable cv;
-  bool answered = false;
-  bool abort = false;
-  bool value_is_null = false;
-  std::vector<uint8_t> value;
-  Dart_Port_DL port = 0;
-  int64_t attempt = 0;
-};
-
-std::map<int64_t, std::shared_ptr<DbTxnState>> g_db_txns;
-int64_t g_next_db_txn = 1;
-
-}  // namespace
-}  // extern "C++"
-
-// Drops the connection and restores it. Bound because it is the only way to
-// see a disconnect handler actually run: registering one is easy to verify,
-// and whether the server carries it out is the part that matters.
-FDB_EXPORT int64_t fdb_db_go_offline(void) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  g_database->GoOffline();
-  return 0;
-}
-
-FDB_EXPORT int64_t fdb_db_go_online(void) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  g_database->GoOnline();
-  return 0;
-}
-
-// Runs a transaction at `path`. Returns a transaction id, or negative.
-//
-// Each attempt posts the current value to `port` with an increasing seq; the
-// handler answers with fdb_db_txn_apply. The final outcome arrives on the same
-// port with seq 0 on success, or a negative seq carrying the reason.
-FDB_EXPORT int64_t fdb_db_txn_run(const char* path, int64_t port) {
-  std::shared_ptr<DbTxnState> state;
-  int64_t id = 0;
-  {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (EnsureDatabase() == nullptr) return -1;
-    if (path == nullptr) return -2;
-    state = std::make_shared<DbTxnState>();
-    state->port = static_cast<Dart_Port_DL>(port);
-    id = g_next_db_txn++;
-    g_db_txns.emplace(id, state);
-  }
-
-  firebase::database::DatabaseReference ref = g_database->GetReference(path);
-  ref.RunTransaction([state](firebase::database::MutableData* data)
-                         -> firebase::database::TransactionResult {
+  query.Get().OnCompletion(
+      [port](const firebase::Future<firebase::firestore::QuerySnapshot>& f) {
         std::vector<uint8_t> payload;
-        if (!fdb::SerializeVariant(data->value(), payload)) {
-          return firebase::database::kTransactionResultAbort;
+        if (f.error() != 0 || f.result() == nullptr) {
+          PostDocument(static_cast<Dart_Port_DL>(port), -1, payload);
+          return;
         }
-
-        std::unique_lock<std::mutex> lock(state->m);
-        state->answered = false;
-        const int64_t attempt = ++state->attempt;
-        lock.unlock();
-
-        // Posted outside the lock: fdb_db_txn_apply takes it, and Dart can
-        // answer before this thread reaches the wait.
-        fdb_post_buffer(state->port, attempt, payload.data(), payload.size());
-
-        lock.lock();
-        state->cv.wait(lock, [&state] { return state->answered; });
-        if (state->abort) {
-          return firebase::database::kTransactionResultAbort;
+        if (!SerializeQueryResult(*f.result(), payload)) {
+          PostDocument(static_cast<Dart_Port_DL>(port), -2, payload);
+          return;
         }
-        Variant next;
-        if (state->value_is_null) {
-          next = Variant::Null();
-        } else if (!fdb::ParseVariant(state->value.data(), state->value.size(),
-                                      &next)) {
-          return firebase::database::kTransactionResultAbort;
-        }
-        data->set_value(next);
-        return firebase::database::kTransactionResultSuccess;
-      })
-      .OnCompletion([state, id](
-                        const firebase::Future<
-                            firebase::database::DataSnapshot>& f) {
-        if (f.error() != 0) {
-          const char* msg =
-              f.error_message() == nullptr ? "" : f.error_message();
-          fdb_post_buffer(state->port, -(f.error() == 0 ? 1 : f.error()),
-                          reinterpret_cast<const uint8_t*>(msg), strlen(msg));
-        } else {
-          // seq 0 is the terminal event, matching the Firestore transactions.
-          std::vector<uint8_t> payload;
-          if (f.result() != nullptr &&
-              fdb::SerializeVariant(f.result()->value(), payload)) {
-            fdb_post_buffer(state->port, 0, payload.data(), payload.size());
-          } else {
-            fdb_post_buffer(state->port, 0, nullptr, 0);
-          }
-        }
-        std::lock_guard<std::mutex> lock(g_mutex);
-        g_db_txns.erase(id);
+        // seq 1 with an empty CBOR array is a query that matched nothing,
+        // which is not the same as a failure — hence the distinct codes above.
+        PostDocument(static_cast<Dart_Port_DL>(port), 1, payload);
       });
+  return 0;
+}
+
+// The same query, watched. Returns a listener id for fdb_fs_unlisten, or a
+// negative code.
+FDB_EXPORT int64_t fdb_fs_query_listen(const char* collection_path,
+                                      const uint8_t* spec, size_t spec_len,
+                                      int64_t port) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (g_firestore == nullptr) return -1;
+  if (collection_path == nullptr) return -2;
+
+  Query query = g_firestore->Collection("_");
+  const int rc = BuildQuery(collection_path, spec, spec_len, &query);
+  if (rc != 0) return rc;
+
+  const int64_t id = g_next_listener++;
+  auto seq = std::make_shared<int64_t>(0);
+  g_listeners.emplace(
+      id, query.AddSnapshotListener(
+              [port, seq](const firebase::firestore::QuerySnapshot& snap,
+                          firebase::firestore::Error error,
+                          const std::string& message) {
+                if (error == firebase::firestore::kErrorOk) {
+                  std::vector<uint8_t> payload;
+                  if (!SerializeQueryResult(snap, payload)) {
+                    PostDocument(static_cast<Dart_Port_DL>(port), -2, payload);
+                    return;
+                  }
+                  PostDocument(static_cast<Dart_Port_DL>(port), ++(*seq),
+                               payload);
+                  return;
+                }
+                // Carry the reason, as the document listener does: a listener
+                // that stops silently is nearly always a rules problem, and an
+                // empty result looks like data.
+                const std::string text =
+                    "error " + std::to_string(static_cast<int>(error)) +
+                    (message.empty() ? "" : ": " + message);
+                std::vector<uint8_t> err;
+                CborEncoder measure;
+                cbor_encoder_init(&measure, nullptr, 0, 0);
+                cbor_encode_text_string(&measure, text.c_str(), text.size());
+                err.resize(cbor_encoder_get_extra_bytes_needed(&measure));
+                CborEncoder enc;
+                cbor_encoder_init(&enc, err.data(), err.size(), 0);
+                cbor_encode_text_string(&enc, text.c_str(), text.size());
+                err.resize(cbor_encoder_get_buffer_size(&enc, err.data()));
+                PostDocument(static_cast<Dart_Port_DL>(port), -1, err);
+              }));
   return id;
 }
 
-// Answers the attempt the SDK is parked on. `abort` non-zero abandons the
-// transaction; otherwise the CBOR is the new value, and a null payload with
-// len 0 means write null.
-FDB_EXPORT int64_t fdb_db_txn_apply(int64_t txn_id, const uint8_t* cbor,
-                                    size_t len, int32_t abort) {
-  std::shared_ptr<DbTxnState> state;
+// Counts what a query matches, without fetching it. Same spec as a read, so a
+// filtered or grouped count needs nothing new.
+// Sum and average, which need the SDK patch that exposes them. Without it
+// Query has Count and nothing else, and the only way to add a column is to
+// download every document.
+//
+// The result is a double even for a sum of integers. Firestore returns an
+// integer there, and the SDK's value() widens it; a caller that wants an
+// integer back can round one it knows is exact, which is better than this
+// layer guessing which sums are safe to narrow.
+static int64_t AggregateOne(const char* collection_path, const uint8_t* spec,
+                            size_t spec_len, const char* field, int64_t port,
+                            bool average) {
+  if (g_firestore == nullptr) return -1;
+  if (collection_path == nullptr || field == nullptr || *field == '\0') {
+    return -2;
+  }
+
+  Query query = g_firestore->Collection("_");
+  const int rc = BuildQuery(collection_path, spec, spec_len, &query);
+  if (rc != 0) return rc;
+
+  // Sum and Average parse the field path, and the SDK rejects a malformed one
+  // by throwing. BuildQuery above already guards its own field paths for the
+  // same reason: an exception crossing this boundary aborts the process
+  // instead of reaching Dart.
+  firebase::firestore::AggregateQuery aggregate;
+  try {
+    aggregate = average ? query.Average(field) : query.Sum(field);
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "fdb_fs_aggregate: %s\n", e.what());
+    return -4;
+  }
+
+  aggregate.Get(firebase::firestore::AggregateSource::kServer)
+      .OnCompletion(
+          [port](const firebase::Future<
+                 firebase::firestore::AggregateQuerySnapshot>& f) {
+            std::vector<uint8_t> payload;
+            if (f.error() != 0 || f.result() == nullptr) {
+              PostDocument(static_cast<Dart_Port_DL>(port), -1, payload);
+              return;
+            }
+            const double v = f.result()->value();
+            CborEncoder measure;
+            cbor_encoder_init(&measure, nullptr, 0, 0);
+            cbor_encode_double(&measure, v);
+            payload.resize(cbor_encoder_get_extra_bytes_needed(&measure));
+            CborEncoder enc;
+            cbor_encoder_init(&enc, payload.data(), payload.size(), 0);
+            cbor_encode_double(&enc, v);
+            payload.resize(cbor_encoder_get_buffer_size(&enc, payload.data()));
+            PostDocument(static_cast<Dart_Port_DL>(port), 1, payload);
+          });
+  return 0;
+}
+
+FDB_EXPORT int64_t fdb_fs_sum(const char* collection_path,
+                              const uint8_t* spec, size_t spec_len,
+                              const char* field, int64_t port) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return AggregateOne(collection_path, spec, spec_len, field, port, false);
+}
+
+FDB_EXPORT int64_t fdb_fs_average(const char* collection_path,
+                                  const uint8_t* spec, size_t spec_len,
+                                  const char* field, int64_t port) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return AggregateOne(collection_path, spec, spec_len, field, port, true);
+}
+
+FDB_EXPORT int64_t fdb_fs_count(const char* collection_path,
+                               const uint8_t* spec, size_t spec_len,
+                               int64_t port) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (g_firestore == nullptr) return -1;
+  if (collection_path == nullptr) return -2;
+
+  Query query = g_firestore->Collection("_");
+  const int rc = BuildQuery(collection_path, spec, spec_len, &query);
+  if (rc != 0) return rc;
+
+  query.Count()
+      .Get(firebase::firestore::AggregateSource::kServer)
+      .OnCompletion(
+          [port](const firebase::Future<
+                 firebase::firestore::AggregateQuerySnapshot>& f) {
+            std::vector<uint8_t> payload;
+            if (f.error() != 0 || f.result() == nullptr) {
+              PostDocument(static_cast<Dart_Port_DL>(port), -1, payload);
+              return;
+            }
+            // The count travels as CBOR, like every other answer, rather than
+            // as a bare integer in the header: one decode path, not two.
+            const int64_t n = f.result()->count();
+            CborEncoder measure;
+            cbor_encoder_init(&measure, nullptr, 0, 0);
+            cbor_encode_int(&measure, n);
+            payload.resize(cbor_encoder_get_extra_bytes_needed(&measure));
+            CborEncoder enc;
+            cbor_encoder_init(&enc, payload.data(), payload.size(), 0);
+            cbor_encode_int(&enc, n);
+            payload.resize(cbor_encoder_get_buffer_size(&enc, payload.data()));
+            PostDocument(static_cast<Dart_Port_DL>(port), 1, payload);
+          });
+  return 0;
+}
+
+FDB_EXPORT int64_t fdb_fs_batch_commit(const uint8_t* writes, size_t len,
+                                      int64_t port) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  if (g_firestore == nullptr) return -1;
+
+  firebase::firestore::WriteBatch batch = g_firestore->batch();
+  if (!ApplyWrites(batch, std::vector<uint8_t>(writes, writes + len))) {
+    return -3;
+  }
+  batch.Commit().OnCompletion([port](const firebase::Future<void>& f) {
+    fdb_post_outcome(port, f.error() == 0 ? 1 : 0, f.error(),
+                     f.error_message() == nullptr ? "" : f.error_message());
+  });
+  return 0;
+}
+
+FDB_EXPORT int64_t fdb_fs_txn_begin(int64_t port) {
+  std::shared_ptr<TxnState> state;
   {
     std::lock_guard<std::mutex> lock(g_mutex);
-    const auto it = g_db_txns.find(txn_id);
-    if (it == g_db_txns.end()) return -1;
-    state = it->second;
+    if (g_firestore == nullptr) return -1;
+    state = std::make_shared<TxnState>();
+    g_txns.emplace(g_next_txn, state);
   }
+  const int64_t id = g_next_txn++;
+  const auto dart_port = static_cast<Dart_Port_DL>(port);
+
+  g_firestore->RunTransaction([state, dart_port](
+                                  Transaction& txn,
+                                  std::string& error) -> firebase::firestore::Error {
+    std::unique_lock<std::mutex> lock(state->m);
+    state->txn = &txn;
+    ++state->attempt;
+
+    // Tell Dart to run the handler. A retry lands here again with a higher
+    // attempt number, which is what makes the handler run a second time.
+    PostDocument(dart_port, state->attempt, std::vector<uint8_t>());
+
+    for (;;) {
+      state->cv.wait(lock, [&] { return state->req != TxnRequest::kNone; });
+      const TxnRequest req = state->req;
+
+      if (req == TxnRequest::kGet) {
+        const std::string path = state->get_path;
+        const Dart_Port_DL reply = state->get_port;
+        state->req = TxnRequest::kNone;
+        // Unlocked across the read: it goes to the network, and holding the
+        // lock would stop Dart queueing anything while it runs.
+        lock.unlock();
+        firebase::firestore::Error code = firebase::firestore::kErrorOk;
+        std::string message;
+        const DocumentSnapshot snap =
+            txn.Get(g_firestore->Document(path), &code, &message);
+        std::vector<uint8_t> payload;
+        if (code != firebase::firestore::kErrorOk) {
+          PostDocument(reply, -1, payload);
+        } else {
+          if (snap.exists()) fdb::SerializeDocument(snap.GetData(), payload);
+          PostDocument(reply, 1, payload);
+        }
+        lock.lock();
+        continue;
+      }
+
+      if (req == TxnRequest::kAbort) {
+        state->req = TxnRequest::kNone;
+        error = "transaction aborted by the handler";
+        return firebase::firestore::kErrorCancelled;
+      }
+
+      // kCommit: apply what Dart buffered, then let the SDK commit.
+      std::vector<uint8_t> writes = std::move(state->writes);
+      state->writes.clear();
+      state->req = TxnRequest::kNone;
+      lock.unlock();
+      const bool ok = ApplyWrites(txn, writes);
+      lock.lock();
+      if (!ok) {
+        error = "a buffered write could not be decoded";
+        return firebase::firestore::kErrorInvalidArgument;
+      }
+      return firebase::firestore::kErrorOk;
+    }
+  }).OnCompletion([dart_port, id](const firebase::Future<void>& f) {
+    {
+      std::lock_guard<std::mutex> lock(g_mutex);
+      g_txns.erase(id);
+    }
+    // seq 0 is the terminal event: the transaction finished, and the payload
+    // carries the reason when it failed.
+    if (f.error() == 0) {
+      PostDocument(dart_port, 0, std::vector<uint8_t>());
+      return;
+    }
+    const std::string text =
+        "error " + std::to_string(f.error()) +
+        (f.error_message() == nullptr ? "" : std::string(": ") + f.error_message());
+    std::vector<uint8_t> err;
+    CborEncoder measure;
+    cbor_encoder_init(&measure, nullptr, 0, 0);
+    cbor_encode_text_string(&measure, text.c_str(), text.size());
+    err.resize(cbor_encoder_get_extra_bytes_needed(&measure));
+    CborEncoder enc;
+    cbor_encoder_init(&enc, err.data(), err.size(), 0);
+    cbor_encode_text_string(&enc, text.c_str(), text.size());
+    err.resize(cbor_encoder_get_buffer_size(&enc, err.data()));
+    PostDocument(dart_port, -1, err);
+  });
+  return id;
+}
+
+// Caller-side helpers. Each wakes the parked lambda; none of them touch the
+// Transaction directly, because it belongs to the SDK's thread.
+static std::shared_ptr<TxnState> TxnFor(int64_t id) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const auto it = g_txns.find(id);
+  return it == g_txns.end() ? nullptr : it->second;
+}
+
+FDB_EXPORT int64_t fdb_fs_txn_get(int64_t txn_id, const char* doc_path,
+                                 int64_t port) {
+  auto state = TxnFor(txn_id);
+  if (state == nullptr) return -1;
+  if (doc_path == nullptr) return -2;
   {
     std::lock_guard<std::mutex> lock(state->m);
-    state->abort = abort != 0;
-    state->value_is_null = (cbor == nullptr || len == 0);
-    state->value.assign(cbor, cbor + (state->value_is_null ? 0 : len));
-    state->answered = true;
+    state->get_path = doc_path;
+    state->get_port = static_cast<Dart_Port_DL>(port);
+    state->req = TxnRequest::kGet;
   }
   state->cv.notify_one();
   return 0;
 }
 
-// PushChild generates its key locally -- no request -- so the key is returned
-// rather than posted. The caller writes to it with fdb_db_set.
-FDB_EXPORT int64_t fdb_db_push(const char* path, char* out, size_t cap) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr || out == nullptr || cap == 0) return -2;
-  const std::string key = g_database->GetReference(path).PushChild().key_string();
-  if (key.empty()) return -3;
-  if (key.size() + 1 > cap) return -4;
-  std::memcpy(out, key.c_str(), key.size() + 1);
-  return static_cast<int64_t>(key.size());
+FDB_EXPORT int64_t fdb_fs_txn_commit(int64_t txn_id, const uint8_t* writes,
+                                    size_t len) {
+  auto state = TxnFor(txn_id);
+  if (state == nullptr) return -1;
+  {
+    std::lock_guard<std::mutex> lock(state->m);
+    state->writes.assign(writes, writes + len);
+    state->req = TxnRequest::kCommit;
+  }
+  state->cv.notify_one();
+  return 0;
 }
 
-FDB_EXPORT int64_t fdb_db_listen(const char* path, int64_t port) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) {
-    return -1;
+FDB_EXPORT int64_t fdb_fs_txn_abort(int64_t txn_id) {
+  auto state = TxnFor(txn_id);
+  if (state == nullptr) return -1;
+  {
+    std::lock_guard<std::mutex> lock(state->m);
+    state->req = TxnRequest::kAbort;
   }
-  const int64_t handle = g_next_value_handle++;
-  auto listener = std::make_unique<PortValueListener>(
-      static_cast<Dart_Port_DL>(port), g_database->GetReference(path));
-  listener->query().AddValueListener(listener.get());
-  g_listeners.emplace(handle, std::move(listener));
-  return handle;
+  state->cv.notify_one();
+  return 0;
 }
 
-// The same query, watched, with a spec applied. Returns a handle for
-// fdb_db_unlisten, or -3 for a spec this ABI cannot apply -- refused rather
-// than run as a weaker query, which would deliver more than was asked for and
-// report nothing wrong.
-FDB_EXPORT int64_t fdb_db_query_listen(const char* path, const uint8_t* spec,
-                                       size_t spec_len, int64_t port) {
+FDB_EXPORT int64_t fdb_fs_delete(const char* doc_path, int64_t port) {
   std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
-
-  firebase::database::Query query = g_database->GetReference(path);
-  if (spec != nullptr && spec_len > 0) {
-    std::map<std::string, Variant> parsed;
-    if (!fdb::ParseVariantMap(spec, spec_len, &parsed)) return -3;
-    if (!ApplyQuerySpec(&query, parsed)) return -3;
-  }
-
-  const int64_t handle = g_next_value_handle++;
-  auto listener = std::make_unique<PortValueListener>(
-      static_cast<Dart_Port_DL>(port), std::move(query));
-  listener->query().AddValueListener(listener.get());
-  g_listeners.emplace(handle, std::move(listener));
-  return handle;
+  if (g_firestore == nullptr) return -1;
+  if (doc_path == nullptr) return -2;
+  g_firestore->Document(doc_path).Delete().OnCompletion(
+      [port](const firebase::Future<void>& f) {
+        PostOutcome(static_cast<Dart_Port_DL>(port), f.error() == 0, f.error(),
+                    f.error_message() == nullptr ? "" : f.error_message());
+      });
+  return 0;
 }
 
-// Child events rather than whole-node snapshots. Same spec, same codes.
-FDB_EXPORT int64_t fdb_db_child_listen(const char* path, const uint8_t* spec,
-                                       size_t spec_len, int64_t port) {
+// Converted from firebase_ffi's fdb_fs_get. Same SDK call and CBOR
+// serialization; only the completion delivery changed — a plain C
+// callback instead of Dart_Port_DL/Dart_PostCObject_DL.
+FDB_EXPORT int64_t fdb_fs_get(const char* doc_path, void* userdata,
+                              FdbCallback cb) {
   std::lock_guard<std::mutex> lock(g_mutex);
-  if (EnsureDatabase() == nullptr) return -1;
-  if (path == nullptr) return -2;
+  if (g_firestore == nullptr) return -1;
+  if (doc_path == nullptr || cb == nullptr) return -2;
 
-  firebase::database::Query query = g_database->GetReference(path);
-  if (spec != nullptr && spec_len > 0) {
-    std::map<std::string, Variant> parsed;
-    if (!fdb::ParseVariantMap(spec, spec_len, &parsed)) return -3;
-    if (!ApplyQuerySpec(&query, parsed)) return -3;
-  }
-
-  // Negative so one unlisten serves both kinds without the caller having to
-  // say which it started; below -1000 so it cannot be read as an error code.
-  const int64_t handle = -(g_next_child_handle++);
-  auto listener = std::make_unique<PortChildListener>(
-      static_cast<Dart_Port_DL>(port), std::move(query));
-  listener->query().AddChildListener(listener.get());
-  g_child_listeners.emplace(handle, std::move(listener));
-  return handle;
+  g_firestore->Document(doc_path).Get().OnCompletion(
+      [userdata, cb](const firebase::Future<DocumentSnapshot>& f) {
+        // Same discipline as BuildQuery: never let an exception cross back
+        // into the caller. SerializeDocument/GetData() don't throw in
+        // practice, but the guard costs nothing.
+        try {
+          if (f.error() != 0) {
+            cb(userdata, -1, nullptr, 0);
+            return;
+          }
+          const bool exists = f.result() != nullptr && f.result()->exists();
+          std::vector<uint8_t> payload;
+          if (exists && !fdb::SerializeDocument(f.result()->GetData(), payload)) {
+            cb(userdata, -2, nullptr, 0);
+            return;
+          }
+          cb(userdata, 1, payload.empty() ? nullptr : payload.data(), payload.size());
+        } catch (const std::exception&) {
+          cb(userdata, -1, nullptr, 0);
+        }
+      });
+  return 0;
 }
 
-FDB_EXPORT void fdb_db_unlisten(int64_t handle) {
+FDB_EXPORT int64_t fdb_fs_listen(const char* doc_path, int64_t port) {
   std::lock_guard<std::mutex> lock(g_mutex);
-  if (handle < 0) {
-    const auto it = g_child_listeners.find(handle);
-    if (it == g_child_listeners.end()) return;
-    it->second->query().RemoveChildListener(it->second.get());
-    g_child_listeners.erase(it);
-    return;
-  }
-  const auto it = g_listeners.find(handle);
-  if (it == g_listeners.end()) {
-    return;
-  }
-  // Remove before destroying: the SDK holds a raw pointer to the listener.
-  it->second->query().RemoveValueListener(it->second.get());
+  if (g_firestore == nullptr) return -1;
+  if (doc_path == nullptr) return -2;
+
+  const int64_t id = g_next_listener++;
+  auto seq = std::make_shared<int64_t>(0);
+  g_listeners.emplace(
+      id, g_firestore->Document(doc_path).AddSnapshotListener(
+              [port, seq](const DocumentSnapshot& snap,
+                          firebase::firestore::Error error,
+                          const std::string& message) {
+                std::vector<uint8_t> payload;
+                if (error == firebase::firestore::kErrorOk) {
+                  if (snap.exists()) fdb::SerializeDocument(snap.GetData(), payload);
+                  PostDocument(static_cast<Dart_Port_DL>(port), ++(*seq),
+                               payload);
+                  return;
+                }
+                // Carry the reason. A listener that stops with no explanation
+                // is nearly always a rules problem, and the caller cannot tell
+                // that from an empty document.
+                const std::string text =
+                    "error " + std::to_string(static_cast<int>(error)) +
+                    (message.empty() ? "" : ": " + message);
+                std::vector<uint8_t> err;
+                CborEncoder measure;
+                cbor_encoder_init(&measure, nullptr, 0, 0);
+                cbor_encode_text_string(&measure, text.c_str(), text.size());
+                err.resize(cbor_encoder_get_extra_bytes_needed(&measure));
+                CborEncoder enc;
+                cbor_encoder_init(&enc, err.data(), err.size(), 0);
+                cbor_encode_text_string(&enc, text.c_str(), text.size());
+                err.resize(cbor_encoder_get_buffer_size(&enc, err.data()));
+                PostDocument(static_cast<Dart_Port_DL>(port), -1, err);
+              }));
+  return id;
+}
+
+FDB_EXPORT int64_t fdb_fs_unlisten(int64_t listener_id) {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  auto it = g_listeners.find(listener_id);
+  if (it == g_listeners.end()) return -1;
+  it->second.Remove();
   g_listeners.erase(it);
+  return 0;
 }
 
 }  // extern "C"
