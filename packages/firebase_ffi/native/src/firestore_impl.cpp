@@ -1252,28 +1252,29 @@ FDB_EXPORT int64_t fdb_fs_delete(const char* doc_path, int64_t port) {
   return 0;
 }
 
-FDB_EXPORT int64_t fdb_fs_get(const char* doc_path, int64_t port) {
+FDB_EXPORT int64_t fdb_fs_get(const char* doc_path, void* userdata,
+                              FdbCallback cb) {
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_firestore == nullptr) return -1;
-  if (doc_path == nullptr) return -2;
+  if (doc_path == nullptr || cb == nullptr) return -2;
+
   g_firestore->Document(doc_path).Get().OnCompletion(
-      [port](const firebase::Future<DocumentSnapshot>& f) {
-        std::vector<uint8_t> payload;
-        if (f.error() != 0) {
-          PostDocument(static_cast<Dart_Port_DL>(port), -1, payload);
-          return;
+      [userdata, cb](const firebase::Future<DocumentSnapshot>& f) {
+        try {
+          if (f.error() != 0) {
+            cb(userdata, -1, nullptr, 0);
+            return;
+          }
+          const bool exists = f.result() != nullptr && f.result()->exists();
+          std::vector<uint8_t> payload;
+          if (exists && !fdb::SerializeDocument(f.result()->GetData(), payload)) {
+            cb(userdata, -2, nullptr, 0);
+            return;
+          }
+          cb(userdata, 1, payload.empty() ? nullptr : payload.data(), payload.size());
+        } catch (const std::exception&) {
+          cb(userdata, -1, nullptr, 0);
         }
-        const bool exists = f.result() != nullptr && f.result()->exists();
-        if (exists && !fdb::SerializeDocument(f.result()->GetData(), payload)) {
-          // Distinct from absence. An empty payload otherwise means the
-          // document is not there, and a failed encode would be indis-
-          // tinguishable from that — the caller would be told "missing" about a
-          // document that exists.
-          PostDocument(static_cast<Dart_Port_DL>(port), -2, payload);
-          return;
-        }
-        // seq 1 with an empty payload: the document does not exist.
-        PostDocument(static_cast<Dart_Port_DL>(port), 1, payload);
       });
   return 0;
 }
