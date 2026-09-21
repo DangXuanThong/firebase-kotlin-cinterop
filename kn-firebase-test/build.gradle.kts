@@ -16,8 +16,13 @@ kotlin {
     }
 
     sourceSets {
-        nativeMain.dependencies {
+        linuxX64Main.dependencies {
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-cbor:1.11.0")
         }
+    }
+
+    compilerOptions {
+        freeCompilerArgs.add("-Xexpect-actual-classes")
     }
 }
