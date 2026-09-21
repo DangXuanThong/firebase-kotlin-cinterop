@@ -16,6 +16,8 @@ kotlin {
         linuxX64Main.dependencies {
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
             implementation("org.jetbrains.kotlinx:kotlinx-serialization-cbor:1.11.0")
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+            implementation("com.squareup.okio:okio:3.18.2")
         }
     }
 
