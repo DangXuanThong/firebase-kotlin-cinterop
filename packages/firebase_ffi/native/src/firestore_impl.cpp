@@ -130,6 +130,31 @@ bool EncodeValue(const FieldValue& v, CborEncoder* enc) {
   }
 }
 
+// Encodes an SDK error as the same CBOR-string-with-negative-seq shape
+// fdb_fs_listen and the transaction completion handler already use, so
+// every converted async function reports failures the same way instead
+// of each one hand-rolling its own encode-then-resize dance.
+bool EncodeErrorCbor(int code, const char* message, std::vector<uint8_t>* out) {
+  const std::string text =
+      "error " + std::to_string(code) +
+      (message == nullptr || message[0] == '\0' ? "" : std::string(": ") + message);
+
+  CborEncoder measure;
+  cbor_encoder_init(&measure, nullptr, 0, 0);
+  if (cbor_encode_text_string(&measure, text.c_str(), text.size()) != CborNoError) {
+    return false;
+  }
+  out->resize(cbor_encoder_get_extra_bytes_needed(&measure));
+
+  CborEncoder enc;
+  cbor_encoder_init(&enc, out->data(), out->size(), 0);
+  if (cbor_encode_text_string(&enc, text.c_str(), text.size()) != CborNoError) {
+    return false;
+  }
+  out->resize(cbor_encoder_get_buffer_size(&enc, out->data()));
+  return true;
+}
+
 }  // namespace
 
 namespace fdb {
@@ -1262,7 +1287,12 @@ FDB_EXPORT int64_t fdb_fs_get(const char* doc_path, void* userdata,
       [userdata, cb](const firebase::Future<DocumentSnapshot>& f) {
         try {
           if (f.error() != 0) {
-            cb(userdata, -1, nullptr, 0);
+            std::vector<uint8_t> err;
+            if (EncodeErrorCbor(f.error(), f.error_message(), &err)) {
+              cb(userdata, -1, err.data(), err.size());
+            } else {
+              cb(userdata, -1, nullptr, 0);
+            }
             return;
           }
           const bool exists = f.result() != nullptr && f.result()->exists();
