@@ -1,9 +1,6 @@
-@file:OptIn(ExperimentalAtomicApi::class)
-
 import com.dangxuanthong.firestore.FirestoreConfig
 import com.dangxuanthong.firestore.data
 import com.dangxuanthong.firestore.initializeFirestore
-import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.Serializable
 

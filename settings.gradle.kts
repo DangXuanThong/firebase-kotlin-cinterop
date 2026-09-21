@@ -10,4 +10,5 @@ dependencyResolutionManagement {
 
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
-include(":kn-firebase-test")
+include(":firebase-firestore")
+include(":example")

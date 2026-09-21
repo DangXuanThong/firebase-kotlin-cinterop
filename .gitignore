@@ -67,3 +67,4 @@ packages/firebase_ffi/.firebase-emulators.json
 firebase-sdk-install/
 **/.gradle/
 **/.kotlin/
+**/local.properties

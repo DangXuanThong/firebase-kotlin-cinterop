@@ -1,12 +1,9 @@
-@file:OptIn(ExperimentalForeignApi::class)
-
 package com.dangxuanthong.firestore
 
 import fdb.fdb_app_init
 import fdb.fdb_fs_get
 import fdb.fdb_fs_init
 import kotlin.coroutines.resumeWithException
-import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.asStableRef
 import kotlinx.cinterop.readBytes
@@ -14,7 +11,6 @@ import kotlinx.cinterop.staticCFunction
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.DeserializationStrategy
-import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.cbor.Cbor
 import kotlinx.serialization.decodeFromByteArray
 
@@ -29,7 +25,6 @@ actual class CollectionReference(private val path: String) {
 actual class DocumentReference(private val path: String) {
     actual val id: String get() = path.substringAfterLast('/')
 
-    @OptIn(ExperimentalSerializationApi::class)
     actual suspend fun get(): DocumentSnapshot = suspendCancellableCoroutine { cont ->
         val ref = StableRef.create(cont)
         val rc = fdb_fs_get(
@@ -58,7 +53,6 @@ actual class DocumentReference(private val path: String) {
     }
 }
 
-@OptIn(ExperimentalSerializationApi::class)
 actual class DocumentSnapshot(private val cbor: ByteArray?) {
     actual val exists: Boolean get() = cbor != null
     actual suspend fun <T> data(strategy: DeserializationStrategy<T>): T =

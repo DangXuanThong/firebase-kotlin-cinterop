@@ -10,9 +10,6 @@ kotlin {
                 defFile(project.file("src/nativeInterop/cinterop/fdb.def"))
             }
         }
-        binaries {
-            executable { entryPoint = "main" }
-        }
     }
 
     sourceSets {
@@ -24,5 +21,9 @@ kotlin {
 
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
+        optIn.addAll(
+            "kotlinx.cinterop.ExperimentalForeignApi",
+            "kotlinx.serialization.ExperimentalSerializationApi"
+        )
     }
 }
