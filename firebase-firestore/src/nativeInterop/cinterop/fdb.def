@@ -1,5 +1,0 @@
-package = fdb
-headers = firebase_bridge.h
-headerFilter = firebase_bridge.h kn_bridge.h
-compilerOpts = -I/run/media/penguin/Data/LapTrinh/KMP/firebase-kotlin-cinterop/packages/firebase_ffi/native/include
-linkerOpts = -L/run/media/penguin/Data/LapTrinh/KMP/firebase-kotlin-cinterop/packages/firebase_ffi/native/build -lfirebase_ffi -rpath /run/media/penguin/Data/LapTrinh/KMP/firebase-kotlin-cinterop/packages/firebase_ffi/native/build

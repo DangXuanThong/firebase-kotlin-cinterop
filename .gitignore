@@ -68,3 +68,4 @@ firebase-sdk-install/
 **/.gradle/
 **/.kotlin/
 **/local.properties
+fdb.def
