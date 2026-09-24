@@ -12,4 +12,5 @@ fun main(): Unit = runBlocking {
     val doc = db.collection("cinterop_test").document("hello").get()
     println("exists=${doc.exists}")
     println(doc.data<TestDoc>())
+    db.close()
 }

@@ -719,6 +719,13 @@ FDB_EXPORT int64_t fdb_fs_set(const char* doc_path, const uint8_t* cbor,
   return 0;
 }
 
+FDB_EXPORT int64_t fdb_fs_shutdown() {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  delete g_firestore;
+  g_firestore = nullptr;
+  return 0;
+}
+
 // Builds a query from a collection path and a spec. Shared by the one-shot
 // read and the listener, so there is one parser rather than two that can
 // disagree about what a spec means.

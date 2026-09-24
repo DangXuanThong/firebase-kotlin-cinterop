@@ -646,6 +646,13 @@ FDB_EXPORT int64_t fdb_db_set_string(const char* path, const char* value) {
   return 0;
 }
 
+FDB_EXPORT int64_t fdb_shutdown() {
+  fdb_fs_shutdown();
+  delete g_app;
+  g_app = nullptr;
+  return 0;
+}
+
 // extern "C++" around the anonymous namespace: these are inside the extern
 // "C" block, where C language linkage suppresses mangling and an anonymous
 // namespace alone does not make a name internal. Without this the helpers are

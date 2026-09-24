@@ -5,6 +5,7 @@ import kotlinx.serialization.serializer
 
 expect class FirebaseFirestore {
     fun collection(path: String): CollectionReference
+    fun close()
 }
 
 expect class CollectionReference {

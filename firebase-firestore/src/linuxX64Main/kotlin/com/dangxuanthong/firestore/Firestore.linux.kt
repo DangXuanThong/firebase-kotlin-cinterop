@@ -3,6 +3,7 @@ package com.dangxuanthong.firestore
 import fdb.fdb_app_init
 import fdb.fdb_fs_get
 import fdb.fdb_fs_init
+import fdb.fdb_shutdown
 import kotlin.coroutines.resumeWithException
 import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.asStableRef
@@ -16,6 +17,9 @@ import kotlinx.serialization.decodeFromByteArray
 
 actual class FirebaseFirestore {
     actual fun collection(path: String): CollectionReference = CollectionReference(path)
+    actual fun close() {
+        fdb_shutdown()
+    }
 }
 
 actual class CollectionReference(private val path: String) {

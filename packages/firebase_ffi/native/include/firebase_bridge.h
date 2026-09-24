@@ -576,6 +576,9 @@ FDB_EXPORT int64_t fdb_fs_unlisten(int64_t listener_id);
 /* Whether this build linked Firestore. */
 FDB_EXPORT int32_t fdb_have_firestore(void);
 
+FDB_EXPORT int64_t fdb_fs_shutdown();
+FDB_EXPORT int64_t fdb_shutdown();
+
 #ifdef __cplusplus
 namespace firebase {
 class App;
