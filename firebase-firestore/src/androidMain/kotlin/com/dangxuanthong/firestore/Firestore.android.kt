@@ -1,5 +1,8 @@
 package com.dangxuanthong.firestore
 
+import android.content.Context
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
 import dev.gitlive.firebase.Firebase
 import dev.gitlive.firebase.firestore.CollectionReference as RealCollectionReference
 import dev.gitlive.firebase.firestore.DocumentReference as RealDocumentReference
@@ -34,3 +37,17 @@ actual class DocumentSnapshot(private val delegate: RealDocumentSnapshot) {
 // Gradle plugin — config is ignored here, unlike native/js.
 actual fun initializeFirestore(config: FirestoreConfig): FirebaseFirestore =
     FirebaseFirestore(Firebase.firestore)
+
+fun initializeFirestore(context: Context, config: FirestoreConfig): FirebaseFirestore {
+    if (FirebaseApp.getApps(context).isEmpty()) {
+        FirebaseApp.initializeApp(
+            context,
+            FirebaseOptions.Builder()
+                .setApiKey(config.apiKey)
+                .setApplicationId(config.appId)
+                .setProjectId(config.projectId)
+                .build()
+        )
+    }
+    return FirebaseFirestore(Firebase.firestore)
+}

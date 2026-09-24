@@ -12,8 +12,7 @@ kotlin {
 
     sourceSets {
         linuxX64Main.dependencies {
-            implementation(projects.firebaseFirestore)
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+            implementation(projects.example.shared)
         }
     }
 }

@@ -32,4 +32,5 @@ dependencyResolutionManagement {
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 include(":firebase-firestore")
-include(":example")
+include(":example:shared")
+include(":example:linuxApp")
