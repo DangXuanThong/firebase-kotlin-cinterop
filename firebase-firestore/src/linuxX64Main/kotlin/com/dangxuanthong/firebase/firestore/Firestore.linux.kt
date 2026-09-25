@@ -1,8 +1,6 @@
-package com.dangxuanthong.firestore
+package com.dangxuanthong.firebase.firestore
 
-import fdb.fdb_app_init
 import fdb.fdb_fs_get
-import fdb.fdb_fs_init
 import fdb.fdb_shutdown
 import kotlin.coroutines.resumeWithException
 import kotlinx.cinterop.StableRef
@@ -16,14 +14,17 @@ import kotlinx.serialization.cbor.Cbor
 import kotlinx.serialization.decodeFromByteArray
 
 actual class FirebaseFirestore {
-    actual fun collection(path: String): CollectionReference = CollectionReference(path)
+    actual fun collection(path: String): CollectionReference =
+        CollectionReference(path)
+
     actual fun close() {
         fdb_shutdown()
     }
 }
 
 actual class CollectionReference(private val path: String) {
-    actual fun document(id: String): DocumentReference = DocumentReference("$path/$id")
+    actual fun document(id: String): DocumentReference =
+        DocumentReference("$path/$id")
 }
 
 actual class DocumentReference(private val path: String) {
@@ -61,19 +62,4 @@ actual class DocumentSnapshot(private val cbor: ByteArray?) {
     actual val exists: Boolean get() = cbor != null
     actual suspend fun <T> data(strategy: DeserializationStrategy<T>): T =
         Cbor.decodeFromByteArray(strategy, cbor ?: error("document does not exist"))
-}
-
-actual object Firebase
-
-actual fun Firebase.initialize(context: Any?, config: FirestoreConfig): FirebaseFirestore {
-    val rc = fdb_app_init(
-        config.applicationId,
-        config.apiKey,
-        config.projectId,
-        config.databaseUrl,
-        config.storageBucket
-    )
-    check(rc == 0L) { "fdb_app_init failed: $rc" }
-    fdb_fs_init()
-    return FirebaseFirestore()
 }

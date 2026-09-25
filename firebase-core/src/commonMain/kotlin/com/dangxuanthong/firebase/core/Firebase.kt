@@ -1,53 +1,27 @@
-package com.dangxuanthong.firestore
+package com.dangxuanthong.firebase.core
 
-import kotlinx.serialization.DeserializationStrategy
-import kotlinx.serialization.serializer
 import okio.FileSystem
 import okio.Path.Companion.toPath
 import okio.SYSTEM
 
-expect class FirebaseFirestore {
-    fun collection(path: String): CollectionReference
-    fun close()
-}
-
-expect class CollectionReference {
-    fun document(id: String): DocumentReference
-}
-
-expect class DocumentReference {
-    val id: String
-    suspend fun get(): DocumentSnapshot
-}
-
-expect class DocumentSnapshot {
-    val exists: Boolean
-    suspend fun <T> data(strategy: DeserializationStrategy<T>): T
-}
-
-suspend inline fun <reified T> DocumentSnapshot.data(): T = data(serializer())
-
-data class FirestoreConfig(
-    val applicationId: String,
-    val apiKey: String,
-    val databaseUrl: String?,
-    val gaTrackingId: String?,
-    val storageBucket: String?,
-    val projectId: String?,
-    val gcmSenderId: String?,
-    val authDomain: String?
-)
-
 /**
- * Entry point for initializing Firebase, mirroring GitLive's own
- * `dev.gitlive.firebase.Firebase` — a bare anchor object; the real API
- * lives in extension functions declared on it.
+ * Single access point to all firebase sdks from Kotlin.
+ *
+ * Acts as a target for extension methods provided by sdks.
  */
 expect object Firebase
 
+/** Returns the default firebase app instance. */
+expect val Firebase.app: FirebaseApp
+
+/** Returns a named firebase app instance. */
+expect fun Firebase.app(name: String): FirebaseApp
+
+/** Returns all firebase app instances. */
+expect fun Firebase.apps(context: Any? = null): List<FirebaseApp>
+
 /**
- * Initializes Firebase for this process/app, returning a ready-to-use
- * [FirebaseFirestore].
+ * Initializes and returns a FirebaseApp.
  *
  * [context] is platform-dependent and ignored where not needed:
  * - **Android**: required — pass a real `android.content.Context`
@@ -58,34 +32,20 @@ expect object Firebase
  * Safe to call more than once with the same config — later calls are a
  * no-op on every platform (mirrors the underlying SDK's own behavior).
  */
-expect fun Firebase.initialize(context: Any? = null, config: FirestoreConfig): FirebaseFirestore
+expect fun Firebase.initialize(context: Any? = null, options: FirebaseOptions): FirebaseApp
 
-class FirestoreConfigBuilder internal constructor() {
-    var applicationId: String = ""
-    var apiKey: String = ""
-    var databaseUrl: String? = null
-    var gaTrackingId: String? = null
-    var storageBucket: String? = null
-    var projectId: String? = null
-    var gcmSenderId: String? = null
-    var authDomain: String? = null
-    internal fun build() = FirestoreConfig(
-        applicationId,
-        apiKey,
-        databaseUrl,
-        gaTrackingId,
-        storageBucket,
-        projectId,
-        gcmSenderId,
-        authDomain
-    )
-}
+/** Initializes and returns a FirebaseApp. */
+expect fun Firebase.initialize(
+    context: Any? = null,
+    options: FirebaseOptions,
+    name: String
+): FirebaseApp
 
 /** Builder-style convenience over [Firebase.initialize]; see its docs for [context]. */
 fun Firebase.initialize(
     context: Any? = null,
     block: FirestoreConfigBuilder.() -> Unit
-): FirebaseFirestore = initialize(context, FirestoreConfigBuilder().apply(block).build())
+): FirebaseApp = initialize(context, FirestoreConfigBuilder().apply(block).build())
 
 /**
  * Reads a `google-services.json`-shaped file from [path] and initializes
@@ -108,7 +68,7 @@ fun Firebase.initialize(
  * IDE run configuration can all differ) — pass an absolute path if you
  * need this to behave the same way regardless of invocation method.
  */
-fun Firebase.initialize(path: String, context: Any? = null): FirebaseFirestore {
+fun Firebase.initialize(context: Any? = null, path: String): FirebaseApp {
     val jsonText = FileSystem.SYSTEM.read(path.toPath()) { readUtf8() }
     return initialize(context, parseGoogleServicesConfig(jsonText))
 }

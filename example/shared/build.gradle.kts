@@ -8,7 +8,7 @@ plugins {
 
 kotlin {
     android {
-        namespace = "com.dangxuanthong.firestore.example.shared"
+        namespace = "com.dangxuanthong.firebase.example.shared"
         compileSdk = 37
         minSdk = 24
 

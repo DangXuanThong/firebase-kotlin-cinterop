@@ -1,4 +1,4 @@
-package com.dangxuanthong.firestore
+package com.dangxuanthong.firebase.core
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -9,14 +9,14 @@ private val json by lazy {
 }
 
 /**
- * Parses google-services.json content into a [FirestoreConfig]
+ * Parses google-services.json content into a [FirebaseOptions]
  */
-fun parseGoogleServicesConfig(jsonText: String): FirestoreConfig {
+fun parseGoogleServicesConfig(jsonText: String): FirebaseOptions {
     val googleServicesJson = json.decodeFromString<GoogleServicesJson>(jsonText)
     val client = googleServicesJson.client.firstOrNull()
         ?: error("google-services.json has no client entries")
 
-    return FirestoreConfig(
+    return FirebaseOptions(
         applicationId = client.clientInfo.mobileSdkAppId,
         apiKey = client.apiKey.firstOrNull()?.currentKey
             ?: error("google-services.json has no API key"),
@@ -24,8 +24,7 @@ fun parseGoogleServicesConfig(jsonText: String): FirestoreConfig {
         gaTrackingId = null,
         storageBucket = googleServicesJson.projectInfo.storageBucket,
         projectId = googleServicesJson.projectInfo.projectId,
-        gcmSenderId = null,
-        authDomain = null
+        gcmSenderId = null
     )
 }
 
