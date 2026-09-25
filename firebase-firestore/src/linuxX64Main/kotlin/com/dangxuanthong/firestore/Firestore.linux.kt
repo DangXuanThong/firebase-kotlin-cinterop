@@ -63,8 +63,16 @@ actual class DocumentSnapshot(private val cbor: ByteArray?) {
         Cbor.decodeFromByteArray(strategy, cbor ?: error("document does not exist"))
 }
 
-actual fun initializeFirestore(config: FirestoreConfig): FirebaseFirestore {
-    val rc = fdb_app_init(config.appId, config.apiKey, config.projectId, "", "")
+actual object Firebase
+
+actual fun Firebase.initialize(context: Any?, config: FirestoreConfig): FirebaseFirestore {
+    val rc = fdb_app_init(
+        config.applicationId,
+        config.apiKey,
+        config.projectId,
+        config.databaseUrl,
+        config.storageBucket
+    )
     check(rc == 0L) { "fdb_app_init failed: $rc" }
     fdb_fs_init()
     return FirebaseFirestore()

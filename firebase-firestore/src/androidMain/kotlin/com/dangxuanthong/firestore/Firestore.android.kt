@@ -1,14 +1,15 @@
 package com.dangxuanthong.firestore
 
 import android.content.Context
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
-import dev.gitlive.firebase.Firebase
+import dev.gitlive.firebase.Firebase as RealFirebase
+import dev.gitlive.firebase.FirebaseOptions
+import dev.gitlive.firebase.apps
 import dev.gitlive.firebase.firestore.CollectionReference as RealCollectionReference
 import dev.gitlive.firebase.firestore.DocumentReference as RealDocumentReference
 import dev.gitlive.firebase.firestore.DocumentSnapshot as RealDocumentSnapshot
 import dev.gitlive.firebase.firestore.FirebaseFirestore as RealFirebaseFirestore
 import dev.gitlive.firebase.firestore.firestore
+import dev.gitlive.firebase.initialize
 import kotlinx.serialization.DeserializationStrategy
 
 actual class FirebaseFirestore(private val delegate: RealFirebaseFirestore) {
@@ -33,21 +34,22 @@ actual class DocumentSnapshot(private val delegate: RealDocumentSnapshot) {
     actual suspend fun <T> data(strategy: DeserializationStrategy<T>): T = delegate.data(strategy)
 }
 
-// Android auto-initializes from google-services.json via the Google Services
-// Gradle plugin — config is ignored here, unlike native/js.
-actual fun initializeFirestore(config: FirestoreConfig): FirebaseFirestore =
-    FirebaseFirestore(Firebase.firestore)
+actual object Firebase
 
-fun initializeFirestore(context: Context, config: FirestoreConfig): FirebaseFirestore {
-    if (FirebaseApp.getApps(context).isEmpty()) {
-        FirebaseApp.initializeApp(
-            context,
-            FirebaseOptions.Builder()
-                .setApiKey(config.apiKey)
-                .setApplicationId(config.appId)
-                .setProjectId(config.projectId)
-                .build()
+actual fun Firebase.initialize(context: Any?, config: FirestoreConfig): FirebaseFirestore {
+    check(context is Context) { "Android requires a real Context to initialize Firestore" }
+    RealFirebase.apps(context).firstOrNull() ?: RealFirebase.initialize(
+        context,
+        FirebaseOptions(
+            applicationId = config.applicationId,
+            apiKey = config.apiKey,
+            databaseUrl = config.databaseUrl,
+            projectId = config.projectId,
+            storageBucket = config.storageBucket,
+            gaTrackingId = config.gaTrackingId,
+            gcmSenderId = config.gcmSenderId,
+            authDomain = config.authDomain
         )
-    }
-    return FirebaseFirestore(Firebase.firestore)
+    )
+    return FirebaseFirestore(RealFirebase.firestore)
 }

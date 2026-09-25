@@ -1,41 +1,55 @@
 package com.dangxuanthong.firestore
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import okio.FileSystem
-import okio.Path.Companion.toPath
-import okio.SYSTEM
 
-@Serializable
-private data class GoogleServicesJson(val project_info: ProjectInfo, val client: List<Client>) {
-    @Serializable data class ProjectInfo(val project_id: String)
-
-    @Serializable data class Client(val client_info: ClientInfo, val api_key: List<ApiKey>)
-
-    @Serializable data class ClientInfo(val mobilesdk_app_id: String)
-
-    @Serializable data class ApiKey(val current_key: String)
+private val json by lazy {
+    Json { ignoreUnknownKeys = true }
 }
 
 /**
- * Parses google-services.json content into a [FirestoreConfig]. Not needed
- * on Android — the Google Services Gradle plugin auto-configures that
- * platform already. Useful on JVM and native, where nothing does.
+ * Parses google-services.json content into a [FirestoreConfig]
  */
 fun parseGoogleServicesConfig(jsonText: String): FirestoreConfig {
-    val parsed = Json { ignoreUnknownKeys = true }
-        .decodeFromString<GoogleServicesJson>(jsonText)
-    val client = parsed.client.firstOrNull()
+    val googleServicesJson = json.decodeFromString<GoogleServicesJson>(jsonText)
+    val client = googleServicesJson.client.firstOrNull()
         ?: error("google-services.json has no client entries")
+
     return FirestoreConfig(
-        apiKey = client.api_key.firstOrNull()?.current_key
-            ?: error("google-services.json has no api_key"),
-        appId = client.client_info.mobilesdk_app_id,
-        projectId = parsed.project_info.project_id
+        applicationId = client.clientInfo.mobileSdkAppId,
+        apiKey = client.apiKey.firstOrNull()?.currentKey
+            ?: error("google-services.json has no API key"),
+        databaseUrl = null,
+        gaTrackingId = null,
+        storageBucket = googleServicesJson.projectInfo.storageBucket,
+        projectId = googleServicesJson.projectInfo.projectId,
+        gcmSenderId = null,
+        authDomain = null
     )
 }
 
-fun loadFirestoreConfig(path: String = "google-services.json"): FirestoreConfig {
-    val jsonText = FileSystem.SYSTEM.read(path.toPath()) { readUtf8() }
-    return parseGoogleServicesConfig(jsonText)
+@Serializable
+private data class GoogleServicesJson(
+    @SerialName("project_info") val projectInfo: ProjectInfo,
+    val client: List<Client>
+) {
+
+    @Serializable
+    data class ProjectInfo(
+        @SerialName("project_id") val projectId: String?,
+        @SerialName("storage_bucket") val storageBucket: String?
+    )
+
+    @Serializable
+    data class Client(
+        @SerialName("client_info") val clientInfo: ClientInfo,
+        @SerialName("api_key") val apiKey: List<ApiKey>
+    )
+
+    @Serializable
+    data class ClientInfo(@SerialName("mobilesdk_app_id") val mobileSdkAppId: String)
+
+    @Serializable
+    data class ApiKey(@SerialName("current_key") val currentKey: String)
 }
