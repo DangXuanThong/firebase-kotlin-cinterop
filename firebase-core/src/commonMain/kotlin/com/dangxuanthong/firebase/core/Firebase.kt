@@ -51,7 +51,7 @@ object Firebase {
      * IDE run configuration can all differ) — pass an absolute path if you
      * need this to behave the same way regardless of invocation method.
      */
-    fun Firebase.initialize(context: Any? = null, path: String): FirebaseApp {
+    fun initialize(context: Any? = null, path: String): FirebaseApp {
         val jsonText = FileSystem.SYSTEM.read(path.toPath()) { readUtf8() }
         return initialize(context, parseGoogleServicesConfig(jsonText))
     }
