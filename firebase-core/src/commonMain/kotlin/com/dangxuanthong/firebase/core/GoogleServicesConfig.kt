@@ -20,10 +20,11 @@ fun parseGoogleServicesConfig(jsonText: String): FirebaseOptions {
         applicationId = client.clientInfo.mobileSdkAppId,
         apiKey = client.apiKey.firstOrNull()?.currentKey
             ?: error("google-services.json has no API key"),
+        projectId = googleServicesJson.projectInfo.projectId
+            ?: error("google-services.json has no project ID"),
         databaseUrl = null,
         gaTrackingId = null,
         storageBucket = googleServicesJson.projectInfo.storageBucket,
-        projectId = googleServicesJson.projectInfo.projectId,
         gcmSenderId = null
     )
 }

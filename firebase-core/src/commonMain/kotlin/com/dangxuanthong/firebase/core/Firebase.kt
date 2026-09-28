@@ -34,8 +34,8 @@ object Firebase {
     /** Builder-style convenience over [initialize]. */
     fun initialize(
         context: Any? = null,
-        block: FirestoreConfigBuilder.() -> Unit
-    ): FirebaseApp = initialize(context, FirestoreConfigBuilder().apply(block).build())
+        block: FirebaseOptionsBuilder.() -> Unit
+    ): FirebaseApp = initialize(context, FirebaseOptionsBuilder().apply(block).build())
 
     /**
      * Reads a `google-services.json`-shaped file from [path] and initializes

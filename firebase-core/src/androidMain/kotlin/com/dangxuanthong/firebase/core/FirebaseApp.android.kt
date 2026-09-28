@@ -12,10 +12,10 @@ actual class FirebaseApp internal constructor(private val delegate: RealFirebase
             FirebaseOptions(
                 applicationId = applicationId,
                 apiKey = apiKey,
+                projectId = projectId!!,
                 databaseUrl = databaseUrl,
                 gaTrackingId = gaTrackingId,
                 storageBucket = storageBucket,
-                projectId = projectId,
                 gcmSenderId = gcmSenderId
             )
         }
