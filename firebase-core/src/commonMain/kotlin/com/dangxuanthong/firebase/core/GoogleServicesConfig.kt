@@ -9,23 +9,30 @@ private val json by lazy {
 }
 
 /**
- * Parses google-services.json content into a [FirebaseOptions]
+ * Parses google-services.json content into a [FirebaseOptions].
+ *
+ * A google-services.json lists one `client` entry per app registered in the project. By default
+ * the first entry is used; pass [applicationId] (the `mobilesdk_app_id` of the app you want,
+ * e.g. `1:1234567890:android:abcdef`) to pick a specific one in multi-app projects.
+ *
+ * @throws IllegalStateException if the file has no matching client entry or no API key.
  */
-fun parseGoogleServicesConfig(jsonText: String): FirebaseOptions {
+fun parseGoogleServicesConfig(jsonText: String, applicationId: String? = null): FirebaseOptions {
     val googleServicesJson = json.decodeFromString<GoogleServicesJson>(jsonText)
-    val client = googleServicesJson.client.firstOrNull()
-        ?: error("google-services.json has no client entries")
+    val client = if (applicationId == null) {
+        googleServicesJson.client.firstOrNull()
+            ?: error("google-services.json has no client entries")
+    } else {
+        googleServicesJson.client.firstOrNull { it.clientInfo.mobileSdkAppId == applicationId }
+            ?: error("google-services.json has no client with applicationId $applicationId")
+    }
 
     return FirebaseOptions(
         applicationId = client.clientInfo.mobileSdkAppId,
         apiKey = client.apiKey.firstOrNull()?.currentKey
             ?: error("google-services.json has no API key"),
-        projectId = googleServicesJson.projectInfo.projectId
-            ?: error("google-services.json has no project ID"),
-        databaseUrl = null,
-        gaTrackingId = null,
         storageBucket = googleServicesJson.projectInfo.storageBucket,
-        gcmSenderId = null
+        projectId = googleServicesJson.projectInfo.projectId
     )
 }
 
@@ -37,7 +44,7 @@ private data class GoogleServicesJson(
 
     @Serializable
     data class ProjectInfo(
-        @SerialName("project_id") val projectId: String?,
+        @SerialName("project_id") val projectId: String,
         @SerialName("storage_bucket") val storageBucket: String?
     )
 

@@ -20,10 +20,12 @@ actual fun Firebase.initialize(
     options: FirebaseOptions,
     name: String
 ): FirebaseApp {
-    check(context is Context) { "Android requires a real Context to initialize Firestore" }
-    RealFirebase.apps(context).firstOrNull { it.name == name }
+    require(context is Context) {
+        "Android requires a real android.content.Context to initialize Firebase"
+    }
+    val app = RealFirebase.apps(context).firstOrNull { it.name == name }
         ?: RealFirebase.initialize(context, options.toRealFirebaseOptions(), name)
-    return app(name)
+    return FirebaseApp(app)
 }
 
 private fun FirebaseOptions.toRealFirebaseOptions() = RealFirebaseOptions(
