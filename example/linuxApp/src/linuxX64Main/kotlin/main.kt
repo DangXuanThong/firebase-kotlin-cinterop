@@ -1,5 +1,5 @@
 import com.dangxuanthong.firebase.core.Firebase
-import com.dangxuanthong.firebase.core.initialize
+import com.dangxuanthong.firebase.core.Firebase.initialize
 import com.dangxuanthong.firebase.firestore.FirebaseFirestore
 import com.dangxuanthong.firebase.firestore.data
 import kotlinx.coroutines.runBlocking

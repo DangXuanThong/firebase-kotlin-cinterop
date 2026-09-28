@@ -12,8 +12,6 @@ data class FirebaseOptions(
     val databaseUrl: String?,
     /**
      * The tracking ID for Google Analytics, for example UA-12345678-1, used to configure Google Analytics.
-     *
-     * @hide
      */
     val gaTrackingId: String?,
     /** The Google Cloud Storage bucket name, for example abc-xyz-123.storage.firebase.com. */
@@ -35,6 +33,7 @@ class FirestoreConfigBuilder internal constructor() {
     var storageBucket: String? = null
     var projectId: String? = null
     var gcmSenderId: String? = null
+
     internal fun build() = FirebaseOptions(
         applicationId,
         apiKey,
