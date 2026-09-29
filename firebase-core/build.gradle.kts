@@ -44,6 +44,9 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.okio)
         }
+        commonTest.dependencies {
+            implementation(libs.kotlin.test)
+        }
         androidMain.dependencies {
             implementation(libs.gitlive.firebase.app)
         }
