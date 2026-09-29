@@ -15,8 +15,9 @@ internal object AppRegistry {
     fun publish(app: FirebaseApp): FirebaseApp =
         if (ref.compareAndSet(null, app)) app else checkNotNull(ref.load())
 
-    /** Clears the registry only if [app] is still the registered instance. */
-    fun clear(app: FirebaseApp) {
-        ref.compareAndSet(app, null)
-    }
+    /**
+     * Clears [app] if it's still the registered instance. Returns whether *this* call did
+     * the clearing, so a caller can tell "I deleted it" from "someone already had".
+     */
+    fun clear(app: FirebaseApp): Boolean = ref.compareAndSet(app, null)
 }
