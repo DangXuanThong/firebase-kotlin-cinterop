@@ -1,9 +1,8 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    kotlin("multiplatform")
-    kotlin("plugin.serialization")
-    id("com.android.kotlin.multiplatform.library")
+    alias(libs.plugins.kotlin)
+    alias(libs.plugins.androidLibrary)
 }
 
 kotlin {
@@ -33,14 +32,13 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(projects.firebaseCore)
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.11.0")
+            implementation(libs.kotlinx.serialization.core)
         }
         linuxX64Main.dependencies {
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-cbor:1.11.0")
+            implementation(libs.kotlinx.serialization.cbor)
         }
         androidMain.dependencies {
-            implementation("dev.gitlive:firebase-firestore:2.7.0")
+            implementation(libs.gitlive.firebase.firestore)
         }
     }
 

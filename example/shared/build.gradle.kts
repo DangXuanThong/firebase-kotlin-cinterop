@@ -1,9 +1,9 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    kotlin("multiplatform")
-    kotlin("plugin.serialization")
-    id("com.android.kotlin.multiplatform.library")
+    alias(libs.plugins.kotlin)
+    alias(libs.plugins.kotlinSerialization)
+    alias(libs.plugins.androidLibrary)
 }
 
 kotlin {
@@ -31,12 +31,12 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(projects.firebaseFirestore)
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+            implementation(libs.kotlinx.serialization.json)
         }
         named("androidDeviceTest").dependencies {
-            implementation("androidx.test.ext:junit:1.3.0")
-            implementation("androidx.test:runner:1.7.0")
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+            implementation(libs.androidx.test.junit)
+            implementation(libs.androidx.test.runner)
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }
