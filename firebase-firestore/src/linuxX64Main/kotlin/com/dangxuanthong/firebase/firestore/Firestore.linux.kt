@@ -1,6 +1,8 @@
 package com.dangxuanthong.firebase.firestore
 
+import com.dangxuanthong.firebase.firestore.exceptions.FirestoreException
 import fdb.fdb_fs_get
+import fdb.fdb_fs_init
 import fdb.fdb_shutdown
 import kotlin.coroutines.resumeWithException
 import kotlinx.cinterop.StableRef
@@ -10,10 +12,15 @@ import kotlinx.cinterop.staticCFunction
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.DeserializationStrategy
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.cbor.Cbor
 import kotlinx.serialization.decodeFromByteArray
 
 actual class FirebaseFirestore {
+    init {
+        fdb_fs_init()
+    }
+
     actual fun collection(path: String): CollectionReference =
         CollectionReference(path)
 
@@ -44,9 +51,9 @@ actual class DocumentReference(private val path: String) {
                     1L -> c.resume(DocumentSnapshot(bytes)) { _, _, _ -> }
 
                     else -> {
-                        val message = bytes?.let { Cbor.decodeFromByteArray<String>(it) }
-                            ?: "fdb_fs_get failed: seq=$seq"
-                        c.resumeWithException(RuntimeException(message))
+                        c.resumeWithException(
+                            decodeFirestoreException(bytes, "fdb_fs_get failed: seq=$seq")
+                        )
                     }
                 }
             }
@@ -62,4 +69,19 @@ actual class DocumentSnapshot(private val cbor: ByteArray?) {
     actual val exists: Boolean get() = cbor != null
     actual suspend fun <T> data(strategy: DeserializationStrategy<T>): T =
         Cbor.decodeFromByteArray(strategy, cbor ?: error("document does not exist"))
+}
+
+@Serializable
+data class ErrorPayload(val code: Int, val message: String)
+
+internal fun decodeFirestoreException(bytes: ByteArray?, fallback: String): FirestoreException {
+    if (bytes == null) {
+        return FirestoreException.Unknown(fallback)
+    }
+    return try {
+        val payload = Cbor.decodeFromByteArray<ErrorPayload>(bytes)
+        FirestoreException.fromCode(payload.code, payload.message)
+    } catch (_: Exception) {
+        FirestoreException.Unknown(fallback)
+    }
 }

@@ -135,24 +135,29 @@ bool EncodeValue(const FieldValue& v, CborEncoder* enc) {
 // every converted async function reports failures the same way instead
 // of each one hand-rolling its own encode-then-resize dance.
 bool EncodeErrorCbor(int code, const char* message, std::vector<uint8_t>* out) {
-  const std::string text =
-      "error " + std::to_string(code) +
-      (message == nullptr || message[0] == '\0' ? "" : std::string(": ") + message);
+  const std::string msg = message == nullptr ? "" : message;
 
-  CborEncoder measure;
-  cbor_encoder_init(&measure, nullptr, 0, 0);
-  if (cbor_encode_text_string(&measure, text.c_str(), text.size()) != CborNoError) {
-    return false;
+  size_t cap = 128;
+  for (int attempt = 0; attempt < 16; ++attempt) {
+    out->assign(cap, 0);
+    CborEncoder enc;
+    cbor_encoder_init(&enc, out->data(), cap, 0);
+    CborEncoder map;
+    const bool ok =
+        cbor_encoder_create_map(&enc, &map, 2) == CborNoError &&
+        cbor_encode_text_string(&map, "code", 4) == CborNoError &&
+        cbor_encode_int(&map, code) == CborNoError &&
+        cbor_encode_text_string(&map, "message", 7) == CborNoError &&
+        cbor_encode_text_string(&map, msg.c_str(), msg.size()) == CborNoError &&
+        cbor_encoder_close_container(&enc, &map) == CborNoError;
+    if (ok) {
+      out->resize(cbor_encoder_get_buffer_size(&enc, out->data()));
+      return true;
+    }
+    cap *= 2;
   }
-  out->resize(cbor_encoder_get_extra_bytes_needed(&measure));
-
-  CborEncoder enc;
-  cbor_encoder_init(&enc, out->data(), out->size(), 0);
-  if (cbor_encode_text_string(&enc, text.c_str(), text.size()) != CborNoError) {
-    return false;
-  }
-  out->resize(cbor_encoder_get_buffer_size(&enc, out->data()));
-  return true;
+  out->clear();
+  return false;
 }
 
 }  // namespace
