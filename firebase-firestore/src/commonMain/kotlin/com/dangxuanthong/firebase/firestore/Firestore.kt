@@ -12,11 +12,6 @@ expect class CollectionReference {
     fun document(id: String): DocumentReference
 }
 
-expect class DocumentReference {
-    val id: String
-    suspend fun get(): DocumentSnapshot
-}
-
 expect class DocumentSnapshot {
     val exists: Boolean
     suspend fun <T> data(strategy: DeserializationStrategy<T>): T

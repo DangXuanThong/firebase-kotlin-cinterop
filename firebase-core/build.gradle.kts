@@ -36,6 +36,11 @@ kotlin {
                 includeDirs("$projectDir/../packages/firebase_ffi/native/include")
             }
         }
+        compilerOptions {
+            optIn.add(
+                "kotlinx.cinterop.ExperimentalForeignApi" // Required for using cinterop features
+            )
+        }
     }
 
     sourceSets {
@@ -54,9 +59,6 @@ kotlin {
 
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
-        optIn.addAll(
-            "kotlinx.cinterop.ExperimentalForeignApi" // Required for using cinterop features
-        )
     }
 }
 

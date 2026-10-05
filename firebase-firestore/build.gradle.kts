@@ -28,12 +28,20 @@ kotlin {
         }
     }
 
-    linuxX64()
+    linuxX64 {
+        compilerOptions {
+            optIn.addAll(
+                "kotlinx.cinterop.ExperimentalForeignApi",
+                "kotlinx.serialization.ExperimentalSerializationApi"
+            )
+        }
+    }
 
     sourceSets {
         commonMain.dependencies {
             api(projects.firebaseCore)
             implementation(libs.kotlinx.serialization.core)
+            implementation(libs.kotlinx.coroutines.core)
         }
         linuxX64Main.dependencies {
             implementation(libs.kotlinx.serialization.cbor)
@@ -45,9 +53,5 @@ kotlin {
 
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
-        optIn.addAll(
-            "kotlinx.cinterop.ExperimentalForeignApi",
-            "kotlinx.serialization.ExperimentalSerializationApi"
-        )
     }
 }
