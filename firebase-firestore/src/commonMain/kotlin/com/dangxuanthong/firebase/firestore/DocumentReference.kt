@@ -1,6 +1,8 @@
 package com.dangxuanthong.firebase.firestore
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.SerializationStrategy
+import kotlinx.serialization.serializer
 
 /**
  * Mirroring `dev.gitlive.firebase.firestore.DocumentReference`
@@ -64,47 +66,28 @@ expect class DocumentReference {
      */
     suspend fun get(source: Source = Source.DEFAULT): DocumentSnapshot
 
+    /**
+     * Writes to the document referred to by this [DocumentReference]. If the document does not
+     * yet exist, it will be created. If you pass [SetOptions], the provided data can be merged
+     * into an existing document.
+     *
+     * @param strategy The serialization strategy to use for encoding the data.
+     * @param data The data to write to the document.
+     * @param setOptions An object to configure the set behavior.
+     */
+    suspend fun <T : Any> set(
+        strategy: SerializationStrategy<T>,
+        data: T,
+        setOptions: SetOptions = SetOptions.Merge
+    )
+
+//    suspend fun updateEncoded(encodedData: EncodedObject)
+//
+//    suspend fun updateEncoded(encodedFieldsAndValues: List<FieldAndValue>)
+
 //    suspend inline fun <reified T : Any> set(
 //        data: T,
 //        merge: Boolean = false,
-//        buildSettings: EncodeSettings.Builder.() -> Unit = {}
-//    )
-//
-//    suspend inline fun <reified T : Any> set(
-//        data: T,
-//        vararg mergeFields: String,
-//        buildSettings: EncodeSettings.Builder.() -> Unit = {}
-//    )
-//
-//    suspend inline fun <reified T : Any> set(
-//        data: T,
-//        vararg mergeFieldPaths: FieldPath,
-//        buildSettings: EncodeSettings.Builder.() -> Unit = {}
-//    )
-//
-//    suspend inline fun <T : Any> set(
-//        strategy: SerializationStrategy<T>,
-//        data: T,
-//        merge: Boolean = false,
-//        buildSettings: EncodeSettings.Builder.() -> Unit = {}
-//    )
-//
-//    suspend inline fun <T : Any> set(
-//        strategy: SerializationStrategy<T>,
-//        data: T,
-//        vararg mergeFields: String,
-//        buildSettings: EncodeSettings.Builder.() -> Unit = {}
-//    )
-//
-//    suspend inline fun <T : Any> set(
-//        strategy: SerializationStrategy<T>,
-//        data: T,
-//        vararg mergeFieldPaths: FieldPath,
-//        buildSettings: EncodeSettings.Builder.() -> Unit = {}
-//    )
-//
-//    suspend inline fun <reified T : Any> update(
-//        data: T,
 //        buildSettings: EncodeSettings.Builder.() -> Unit = {}
 //    )
 //
@@ -124,3 +107,8 @@ expect class DocumentReference {
 
     suspend fun delete()
 }
+
+suspend inline fun <reified T : Any> DocumentReference.set(
+    data: T,
+    setOptions: SetOptions = SetOptions.Merge
+) = set(serializer(), data, setOptions)

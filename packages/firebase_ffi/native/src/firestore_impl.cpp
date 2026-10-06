@@ -707,19 +707,32 @@ FDB_EXPORT int64_t fdb_fs_init(void) {
 }
 
 FDB_EXPORT int64_t fdb_fs_set(const char* doc_path, const uint8_t* cbor,
-                              size_t len, int32_t merge, int64_t port) {
+                              size_t len, int32_t merge, void* userdata,
+                              FdbCallback cb) {
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_firestore == nullptr) return -1;
-  if (doc_path == nullptr || cbor == nullptr) return -2;
+  if (doc_path == nullptr || cbor == nullptr || cb == nullptr) return -2;
 
   MapFieldValue data;
   if (!fdb::ParseDocumentCbor(cbor, len, &data)) return -3;
 
   g_firestore->Document(doc_path)
       .Set(data, merge != 0 ? SetOptions::Merge() : SetOptions())
-      .OnCompletion([port](const firebase::Future<void>& f) {
-        PostOutcome(static_cast<Dart_Port_DL>(port), f.error() == 0, f.error(),
-                    f.error_message() == nullptr ? "" : f.error_message());
+      .OnCompletion([userdata, cb](const firebase::Future<void>& f) {
+        try {
+          if (f.error() != 0) {
+            std::vector<uint8_t> err;
+            if (EncodeErrorCbor(f.error(), f.error_message(), &err)) {
+              cb(userdata, -1, err.data(), err.size());
+            } else {
+              cb(userdata, -1, nullptr, 0);
+            }
+            return;
+          }
+          cb(userdata, 1, nullptr, 0);
+        } catch (const std::exception&) {
+          cb(userdata, -1, nullptr, 0);
+        }
       });
   return 0;
 }
@@ -1321,41 +1334,33 @@ FDB_EXPORT int64_t fdb_fs_get(const char* doc_path, void* userdata,
   return 0;
 }
 
-FDB_EXPORT int64_t fdb_fs_listen(const char* doc_path, int64_t port) {
+FDB_EXPORT int64_t fdb_fs_listen(const char* doc_path, void* userdata, FdbCallback cb) {
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_firestore == nullptr) return -1;
-  if (doc_path == nullptr) return -2;
+  if (doc_path == nullptr || cb == nullptr) return -2;
 
   const int64_t id = g_next_listener++;
   auto seq = std::make_shared<int64_t>(0);
   g_listeners.emplace(
       id, g_firestore->Document(doc_path).AddSnapshotListener(
-              [port, seq](const DocumentSnapshot& snap,
+              [userdata, cb, seq](const DocumentSnapshot& snap,
                           firebase::firestore::Error error,
                           const std::string& message) {
                 std::vector<uint8_t> payload;
                 if (error == firebase::firestore::kErrorOk) {
                   if (snap.exists()) fdb::SerializeDocument(snap.GetData(), payload);
-                  PostDocument(static_cast<Dart_Port_DL>(port), ++(*seq),
-                               payload);
+                  cb(userdata, ++(*seq), payload.empty() ? nullptr : payload.data(), payload.size());
                   return;
                 }
                 // Carry the reason. A listener that stops with no explanation
                 // is nearly always a rules problem, and the caller cannot tell
                 // that from an empty document.
-                const std::string text =
-                    "error " + std::to_string(static_cast<int>(error)) +
-                    (message.empty() ? "" : ": " + message);
                 std::vector<uint8_t> err;
-                CborEncoder measure;
-                cbor_encoder_init(&measure, nullptr, 0, 0);
-                cbor_encode_text_string(&measure, text.c_str(), text.size());
-                err.resize(cbor_encoder_get_extra_bytes_needed(&measure));
-                CborEncoder enc;
-                cbor_encoder_init(&enc, err.data(), err.size(), 0);
-                cbor_encode_text_string(&enc, text.c_str(), text.size());
-                err.resize(cbor_encoder_get_buffer_size(&enc, err.data()));
-                PostDocument(static_cast<Dart_Port_DL>(port), -1, err);
+                if (EncodeErrorCbor(static_cast<int>(error), message.c_str(), &err)) {
+                  cb(userdata, -1, err.data(), err.size());
+                } else {
+                  cb(userdata, -1, nullptr, 0);
+                }
               }));
   return id;
 }

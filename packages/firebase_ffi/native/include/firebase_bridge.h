@@ -483,7 +483,8 @@ FDB_EXPORT int64_t fdb_fs_use_emulator(const char* host, int64_t port);
 /* Writes `doc_path` from a CBOR-encoded map. `merge` non-zero merges rather
  * than replaces. The outcome is posted to `port` as [ok, code, message]. */
 FDB_EXPORT int64_t fdb_fs_set(const char* doc_path, const uint8_t* cbor,
-                              size_t len, int32_t merge, int64_t port);
+                              size_t len, int32_t merge, void* userdata,
+                              FdbCallback cb);
 
 /* Reads `doc_path`. Posts the document as a snapshot buffer on `port`: the
  * usual header, then a CBOR map, or an empty payload when it does not exist. */
@@ -568,7 +569,7 @@ FDB_EXPORT int64_t fdb_fs_delete(const char* doc_path, int64_t port);
 
 /* Watches `doc_path`, posting a snapshot buffer per change. Returns a listener
  * id for fdb_fs_unlisten, or a negative value on failure. */
-FDB_EXPORT int64_t fdb_fs_listen(const char* doc_path, int64_t port);
+FDB_EXPORT int64_t fdb_fs_listen(const char* doc_path, void* userdata, FdbCallback cb);
 
 /* Stops a listener started by fdb_fs_listen. */
 FDB_EXPORT int64_t fdb_fs_unlisten(int64_t listener_id);

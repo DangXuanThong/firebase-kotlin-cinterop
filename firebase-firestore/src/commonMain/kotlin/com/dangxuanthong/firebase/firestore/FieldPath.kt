@@ -28,8 +28,7 @@ class FieldPath(private val segments: List<String>) {
     constructor(vararg fieldNames: String) : this(fieldNames.toList())
 
     val encoded: String
-        get() = if (segments == listOf(KEY_PATH)) KEY_PATH
-        else segments.joinToString(".")
+        get() = segments.joinToString(".")
 
     override fun equals(other: Any?) = other is FieldPath && segments == other.segments
     override fun hashCode() = segments.hashCode()
