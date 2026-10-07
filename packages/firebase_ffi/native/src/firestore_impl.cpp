@@ -718,7 +718,7 @@ FDB_EXPORT int64_t fdb_fs_set(const char* doc_path, const uint8_t* cbor,
                               FdbCallback cb) {
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_firestore == nullptr) return -1;
-  if (doc_path == nullptr || cbor == nullptr || cb == nullptr) return -2;
+  if (doc_path == nullptr || cbor == nullptr) return -2;
 
   MapFieldValue data;
   if (!fdb::ParseDocumentCbor(cbor, len, &data)) return -3;
@@ -726,19 +726,12 @@ FDB_EXPORT int64_t fdb_fs_set(const char* doc_path, const uint8_t* cbor,
   g_firestore->Document(doc_path)
       .Set(data, merge != 0 ? SetOptions::Merge() : SetOptions())
       .OnCompletion([userdata, cb](const firebase::Future<void>& f) {
-        try {
-          if (f.error() != 0) {
-            std::vector<uint8_t> err;
-            if (EncodeErrorCbor(f.error(), f.error_message(), &err)) {
-              cb(userdata, -1, err.data(), err.size());
-            } else {
-              cb(userdata, -1, nullptr, 0);
-            }
-            return;
-          }
-          cb(userdata, 1, nullptr, 0);
-        } catch (const std::exception&) {
-          cb(userdata, -1, nullptr, 0);
+        if (f.error() == 0) cb(userdata, 1, nullptr, 0);
+        else {
+          std::vector<uint8_t> err;
+          if (EncodeErrorCbor(f.error(), f.error_message(), &err))
+            cb(userdata, -1, err.data(), err.size());
+          else cb(userdata, -1, nullptr, 0);
         }
       });
   return 0;
@@ -1309,34 +1302,31 @@ FDB_EXPORT int64_t fdb_fs_delete(const char* doc_path, int64_t port) {
   return 0;
 }
 
-FDB_EXPORT int64_t fdb_fs_get(const char* doc_path, void* userdata,
-                              FdbCallback cb) {
+FDB_EXPORT int64_t fdb_fs_get(const char* doc_path, void* userdata, FdbCallback cb) {
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_firestore == nullptr) return -1;
-  if (doc_path == nullptr || cb == nullptr) return -2;
+  if (doc_path == nullptr) return -2;
 
   g_firestore->Document(doc_path).Get().OnCompletion(
       [userdata, cb](const firebase::Future<DocumentSnapshot>& f) {
-        try {
-          if (f.error() != 0) {
-            std::vector<uint8_t> err;
-            if (EncodeErrorCbor(f.error(), f.error_message(), &err)) {
-              cb(userdata, -1, err.data(), err.size());
-            } else {
-              cb(userdata, -1, nullptr, 0);
-            }
-            return;
-          }
-          const bool exists = f.result() != nullptr && f.result()->exists();
-          std::vector<uint8_t> payload;
-          if (exists && !fdb::SerializeDocument(f.result()->GetData(), payload)) {
-            cb(userdata, -2, nullptr, 0);
-            return;
-          }
-          cb(userdata, 1, payload.empty() ? nullptr : payload.data(), payload.size());
-        } catch (const std::exception&) {
-          cb(userdata, -1, nullptr, 0);
+        std::vector<uint8_t> payload;
+        if (f.error() != 0) {
+          if (EncodeErrorCbor(f.error(), f.error_message(), &payload))
+            cb(userdata, -1, payload.data(), payload.size());
+          else cb(userdata, -1, nullptr, 0);
+          return;
         }
+        const bool exists = f.result() != nullptr && f.result()->exists();
+        if (exists && !fdb::SerializeDocument(f.result()->GetData(), payload)) {
+          // Distinct from absence. An empty payload otherwise means the
+          // document is not there, and a failed encode would be indis-
+          // tinguishable from that — the caller would be told "missing" about a
+          // document that exists.
+          cb(userdata, -2, nullptr, 0);
+          return;
+        }
+        // seq 1 with an empty payload: the document does not exist.
+        cb(userdata, 1, payload.empty() ? nullptr : payload.data(), payload.size());
       });
   return 0;
 }
@@ -1344,7 +1334,7 @@ FDB_EXPORT int64_t fdb_fs_get(const char* doc_path, void* userdata,
 FDB_EXPORT int64_t fdb_fs_listen(const char* doc_path, void* userdata, FdbCallback cb) {
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_firestore == nullptr) return -1;
-  if (doc_path == nullptr || cb == nullptr) return -2;
+  if (doc_path == nullptr) return -2;
 
   const int64_t id = g_next_listener++;
   auto seq = std::make_shared<int64_t>(0);
@@ -1356,18 +1346,17 @@ FDB_EXPORT int64_t fdb_fs_listen(const char* doc_path, void* userdata, FdbCallba
                 std::vector<uint8_t> payload;
                 if (error == firebase::firestore::kErrorOk) {
                   if (snap.exists()) fdb::SerializeDocument(snap.GetData(), payload);
-                  cb(userdata, ++(*seq), payload.empty() ? nullptr : payload.data(), payload.size());
+                  cb(userdata, ++(*seq), payload.empty() ? nullptr : payload.data(),
+                      payload.size());
                   return;
                 }
                 // Carry the reason. A listener that stops with no explanation
                 // is nearly always a rules problem, and the caller cannot tell
                 // that from an empty document.
                 std::vector<uint8_t> err;
-                if (EncodeErrorCbor(static_cast<int>(error), message.c_str(), &err)) {
+                if (EncodeErrorCbor(static_cast<int>(error), message.c_str(), &err))
                   cb(userdata, -1, err.data(), err.size());
-                } else {
-                  cb(userdata, -1, nullptr, 0);
-                }
+                else cb(userdata, -1, nullptr, 0);
               }));
   return id;
 }

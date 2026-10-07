@@ -647,7 +647,6 @@ FDB_EXPORT int64_t fdb_db_set_string(const char* path, const char* value) {
 }
 
 FDB_EXPORT int64_t fdb_shutdown() {
-  fdb_fs_shutdown();
   delete g_app;
   g_app = nullptr;
   return 0;
