@@ -105,6 +105,9 @@ expect class DocumentReference {
 //        fieldsAndValuesUpdateDSL: FieldsAndValuesUpdateDSL.() -> Unit
 //    )
 
+    /**
+     * Deletes the document referred to by this [DocumentReference].
+     */
     suspend fun delete()
 }
 

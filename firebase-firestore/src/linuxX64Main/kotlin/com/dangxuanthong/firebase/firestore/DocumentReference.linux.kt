@@ -1,6 +1,7 @@
 package com.dangxuanthong.firebase.firestore
 
 import com.dangxuanthong.firebase.firestore.exceptions.decodeFirestoreException
+import fdb.fdb_fs_delete
 import fdb.fdb_fs_get
 import fdb.fdb_fs_listen
 import fdb.fdb_fs_set
@@ -138,5 +139,33 @@ actual data class DocumentReference internal constructor(actual val path: String
         cont.invokeOnCancellation { ref.disposeIfNotAlready() }
     }
 
-    actual suspend fun delete(): Unit = TODO("Not yet implemented")
+    actual suspend fun delete(): Unit = suspendCancellableCoroutine { cont ->
+        val ref = SafeRef.create(cont)
+        val rc = fdb_fs_delete(
+            path,
+            ref.asCPointer(),
+            staticCFunction { userdata, seq, payload, len ->
+                val cont = userdata!!.asSafeRef<CancellableContinuation<Unit>>()
+                    .also { it.disposeIfNotAlready() }
+                    .get()
+                if (seq > 0) cont.resume(Unit) { _, _, _ -> }
+                else {
+                    val bytes = payload?.readBytes(len.toInt())?.takeIf { it.isNotEmpty() }
+                    cont.resumeWithException(
+                        decodeFirestoreException(bytes, "fdb_fs_delete failed: seq=$seq")
+                    )
+                }
+            }
+        )
+        if (rc < 0) {
+            ref.disposeIfNotAlready()
+            cont.resumeWithException(
+                when (rc) {
+                    -1L -> IllegalStateException("You must call Firebase.initialize first.")
+                    else -> RuntimeException("Error during delete: fdb_fs_delete returned $rc")
+                }
+            )
+        }
+        cont.invokeOnCancellation { ref.disposeIfNotAlready() }
+    }
 }

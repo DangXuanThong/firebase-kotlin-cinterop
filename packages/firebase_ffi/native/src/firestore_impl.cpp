@@ -1290,14 +1290,19 @@ FDB_EXPORT int64_t fdb_fs_txn_abort(int64_t txn_id) {
   return 0;
 }
 
-FDB_EXPORT int64_t fdb_fs_delete(const char* doc_path, int64_t port) {
+FDB_EXPORT int64_t fdb_fs_delete(const char* doc_path, void* userdata, FdbCallback cb) {
   std::lock_guard<std::mutex> lock(g_mutex);
   if (g_firestore == nullptr) return -1;
   if (doc_path == nullptr) return -2;
   g_firestore->Document(doc_path).Delete().OnCompletion(
-      [port](const firebase::Future<void>& f) {
-        PostOutcome(static_cast<Dart_Port_DL>(port), f.error() == 0, f.error(),
-                    f.error_message() == nullptr ? "" : f.error_message());
+      [userdata, cb](const firebase::Future<void>& f) {
+        if (f.error() == 0) cb(userdata, 1, nullptr, 0);
+        else {
+          std::vector<uint8_t> err;
+          if (EncodeErrorCbor(f.error(), f.error_message(), &err))
+            cb(userdata, -1, err.data(), err.size());
+          else cb(userdata, -1, nullptr, 0);
+        }
       });
   return 0;
 }

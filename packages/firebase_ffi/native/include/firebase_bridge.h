@@ -493,7 +493,6 @@ FDB_EXPORT int64_t fdb_fs_set(const char* doc_path, const uint8_t* cbor,
  * and len of the payload. */
 FDB_EXPORT int64_t fdb_fs_get(const char* doc_path, void* userdata, FdbCallback cb);
 
-/* Deletes `doc_path`. Outcome posted as for fdb_fs_set. */
 /* Runs a query over a collection. `spec` is a CBOR map, or null for a plain
  * read of the collection:
  *
@@ -568,7 +567,8 @@ FDB_EXPORT int64_t fdb_fs_txn_commit(int64_t txn_id, const uint8_t* writes,
                                     size_t len);
 FDB_EXPORT int64_t fdb_fs_txn_abort(int64_t txn_id);
 
-FDB_EXPORT int64_t fdb_fs_delete(const char* doc_path, int64_t port);
+/* Deletes `doc_path`. Outcome posted as for fdb_fs_set. */
+FDB_EXPORT int64_t fdb_fs_delete(const char* doc_path, void* userdata, FdbCallback cb);
 
 /* Watches `doc_path`, posting a snapshot buffer per change. Returns a listener
  * id for fdb_fs_unlisten, or a negative value on failure. */
