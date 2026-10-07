@@ -1,5 +1,6 @@
 package com.dangxuanthong.firebase.firestore
 
+import com.dangxuanthong.firebase.firestore.exceptions.decodeFirestoreException
 import fdb.fdb_fs_get
 import fdb.fdb_fs_listen
 import fdb.fdb_fs_set

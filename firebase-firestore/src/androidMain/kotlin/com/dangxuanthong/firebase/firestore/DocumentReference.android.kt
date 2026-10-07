@@ -1,6 +1,8 @@
 package com.dangxuanthong.firebase.firestore
 
+import com.dangxuanthong.firebase.firestore.exceptions.toFirestoreException
 import dev.gitlive.firebase.firestore.DocumentReference as RealDocumentReference
+import dev.gitlive.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.SerializationStrategy
@@ -23,7 +25,11 @@ actual class DocumentReference internal constructor(private val delegate: RealDo
         CollectionReference(delegate.collection(collectionPath))
 
     actual suspend fun get(source: Source): DocumentSnapshot =
-        DocumentSnapshot(delegate.get(source.toRealSource()))
+        try {
+            DocumentSnapshot(delegate.get(source.toRealSource()))
+        } catch (e: FirebaseFirestoreException) {
+            throw e.toFirestoreException()
+        }
 
     actual suspend fun <T : Any> set(
         strategy: SerializationStrategy<T>,
