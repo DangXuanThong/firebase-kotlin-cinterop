@@ -15,9 +15,9 @@ extern "C" {
 #endif
 
 // seq keeps the same meaning firebase_ffi already used:
-//   1  : success. len == 0 means "document does not exist".
-//  -1  : the SDK operation itself failed.
-//  -2  : it succeeded, but the result failed to serialize.
+//   > 0  : success. len == 0 means "document does not exist".
+//  -1    : the SDK operation itself failed.
+//  -2    : it succeeded, but the result failed to serialize.
 typedef void (*FdbCallback)(void* userdata, int64_t seq,
                             const uint8_t* payload, size_t len);
 

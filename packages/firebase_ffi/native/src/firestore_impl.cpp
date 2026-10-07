@@ -130,34 +130,41 @@ bool EncodeValue(const FieldValue& v, CborEncoder* enc) {
   }
 }
 
+// Helper of EncodeErrorCbor: try to encode an error with given code and msg, return the size
+// needed to encode or -1 if error during encoding
+ssize_t tryEncode(CborEncoder* encoder, uint8_t* buffer, size_t size, int code, const std::string msg) {
+  cbor_encoder_init(encoder, buffer, size, 0);
+  CborEncoder map;
+  CborError err = cbor_encoder_create_map(encoder, &map, 2);
+  if (err != CborNoError && err != CborErrorOutOfMemory) return -1;
+  err = cbor_encode_text_string(&map, "code", 4);
+  if (err != CborNoError && err != CborErrorOutOfMemory) return -1;
+  err = cbor_encode_int(&map, code);
+  if (err != CborNoError && err != CborErrorOutOfMemory) return -1;
+  err = cbor_encode_text_string(&map, "message", 7);
+  if (err != CborNoError && err != CborErrorOutOfMemory) return -1;
+  err = cbor_encode_text_string(&map, msg.c_str(), msg.size());
+  if (err != CborNoError && err != CborErrorOutOfMemory) return -1;
+  err = cbor_encoder_close_container(encoder, &map);
+  if (err != CborNoError && err != CborErrorOutOfMemory) return -1;
+  return cbor_encoder_get_extra_bytes_needed(encoder);
+}
+
 // Encodes an SDK error as the same CBOR-string-with-negative-seq shape
 // fdb_fs_listen and the transaction completion handler already use, so
 // every converted async function reports failures the same way instead
 // of each one hand-rolling its own encode-then-resize dance.
 bool EncodeErrorCbor(int code, const char* message, std::vector<uint8_t>* out) {
   const std::string msg = message == nullptr ? "" : message;
+  CborEncoder measure;
+  ssize_t required_size = tryEncode(&measure, nullptr, 0, code, msg);
+  if (required_size < 0) return false;
+  out->resize(required_size);
 
-  size_t cap = 128;
-  for (int attempt = 0; attempt < 16; ++attempt) {
-    out->assign(cap, 0);
-    CborEncoder enc;
-    cbor_encoder_init(&enc, out->data(), cap, 0);
-    CborEncoder map;
-    const bool ok =
-        cbor_encoder_create_map(&enc, &map, 2) == CborNoError &&
-        cbor_encode_text_string(&map, "code", 4) == CborNoError &&
-        cbor_encode_int(&map, code) == CborNoError &&
-        cbor_encode_text_string(&map, "message", 7) == CborNoError &&
-        cbor_encode_text_string(&map, msg.c_str(), msg.size()) == CborNoError &&
-        cbor_encoder_close_container(&enc, &map) == CborNoError;
-    if (ok) {
-      out->resize(cbor_encoder_get_buffer_size(&enc, out->data()));
-      return true;
-    }
-    cap *= 2;
-  }
-  out->clear();
-  return false;
+  CborEncoder actual;
+  if (tryEncode(&actual, out->data(), out->size(), code, msg) < 0) return false;
+  out->resize(cbor_encoder_get_buffer_size(&actual, out->data()));
+  return true;
 }
 
 }  // namespace
@@ -659,11 +666,11 @@ void PostDocument(Dart_Port_DL port, int64_t seq,
   Dart_PostCObject_DL(port, &obj);
 }
 
-// Decodes a CBOR map into the document body a write applies.
 }  // namespace
 
 namespace fdb {
 
+// Decodes a CBOR map into the document body a write applies.
 bool ParseDocumentCbor(const uint8_t* cbor, size_t len, MapFieldValue* out) {
   CborParser parser;
   CborValue it;

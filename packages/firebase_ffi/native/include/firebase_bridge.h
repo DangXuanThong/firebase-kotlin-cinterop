@@ -90,6 +90,8 @@ FDB_EXPORT void fdb_emit_snapshot_copying(int64_t handle, int64_t seq, size_t va
 // Dart can measure post-to-receive against a single time base.
 FDB_EXPORT int64_t fdb_now_ns(void);
 
+FDB_EXPORT int64_t fdb_shutdown();
+
 // ── v2: the real Database, present only when built with the SDK ─────────────
 //
 // fdb_have_firebase() reports whether this build linked it, so a caller can
@@ -481,13 +483,14 @@ FDB_EXPORT int64_t fdb_fs_init(void);
 FDB_EXPORT int64_t fdb_fs_use_emulator(const char* host, int64_t port);
 
 /* Writes `doc_path` from a CBOR-encoded map. `merge` non-zero merges rather
- * than replaces. The outcome is posted to `port` as [ok, code, message]. */
+ * than replaces. The outcome is passed to `cb` as [userdata, code, payload, len]. */
 FDB_EXPORT int64_t fdb_fs_set(const char* doc_path, const uint8_t* cbor,
                               size_t len, int32_t merge, void* userdata,
                               FdbCallback cb);
 
-/* Reads `doc_path`. Posts the document as a snapshot buffer on `port`: the
- * usual header, then a CBOR map, or an empty payload when it does not exist. */
+/* Reads `doc_path`. Posts the document as a snapshot buffer on `cb`: the
+ * usual `userdata`, a seq number, then a CBOR map, or an empty payload when it does not exist
+ * and len of the payload. */
 FDB_EXPORT int64_t fdb_fs_get(const char* doc_path, void* userdata, FdbCallback cb);
 
 /* Deletes `doc_path`. Outcome posted as for fdb_fs_set. */
@@ -578,7 +581,6 @@ FDB_EXPORT int64_t fdb_fs_unlisten(int64_t listener_id);
 FDB_EXPORT int32_t fdb_have_firestore(void);
 
 FDB_EXPORT int64_t fdb_fs_shutdown();
-FDB_EXPORT int64_t fdb_shutdown();
 
 #ifdef __cplusplus
 namespace firebase {
