@@ -1,6 +1,7 @@
 package com.dangxuanthong.firebase.firestore
 
 import fdb.fdb_fs_init
+import fdb.fdb_fs_shutdown
 import fdb.fdb_shutdown
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.cbor.Cbor
@@ -14,6 +15,7 @@ actual class FirebaseFirestore {
         CollectionReference(path)
 
     actual fun close() {
+        fdb_fs_shutdown()
         fdb_shutdown()
     }
 }

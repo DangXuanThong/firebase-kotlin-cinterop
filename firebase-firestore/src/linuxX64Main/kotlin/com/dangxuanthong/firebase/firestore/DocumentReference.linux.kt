@@ -44,8 +44,15 @@ actual data class DocumentReference internal constructor(actual val path: String
             )
             if (listenerId < 0) {
                 ref.disposeIfNotAlready()
-                close(RuntimeException("fdb_fs_listen returned $listenerId"))
-                return@callbackFlow
+                close(
+                    when (listenerId) {
+                        -1L -> IllegalStateException("You must call Firebase.initialize first.")
+
+                        else -> RuntimeException(
+                            "Error during listen: fdb_fs_listen returned $listenerId"
+                        )
+                    }
+                )
             }
 
             awaitClose {
@@ -70,19 +77,24 @@ actual data class DocumentReference internal constructor(actual val path: String
             path,
             ref.asCPointer(),
             staticCFunction { userdata, seq, payload, len ->
-                val ref = userdata!!.asSafeRef<CancellableContinuation<DocumentSnapshot>>()
-                val cont = ref.get()
+                val cont = userdata!!.asSafeRef<CancellableContinuation<DocumentSnapshot>>()
+                    .also { it.disposeIfNotAlready() }
+                    .get()
                 val bytes = payload?.readBytes(len.toInt())?.takeIf { it.isNotEmpty() }
-                ref.disposeIfNotAlready()
-                if (seq == 1L) cont.resume(DocumentSnapshot(bytes)) { _, _, _ -> }
+                if (seq > 0) cont.resume(DocumentSnapshot(bytes)) { _, _, _ -> }
                 else cont.resumeWithException(
                     decodeFirestoreException(bytes, "fdb_fs_get failed: seq=$seq")
                 )
             }
         )
-        if (rc != 0L) {
+        if (rc < 0) {
             ref.disposeIfNotAlready()
-            cont.resumeWithException(RuntimeException("fdb_fs_get returned $rc"))
+            cont.resumeWithException(
+                when (rc) {
+                    -1L -> IllegalStateException("You must call Firebase.initialize first.")
+                    else -> RuntimeException("Error during get: fdb_fs_get returned $rc")
+                }
+            )
         }
         cont.invokeOnCancellation { ref.disposeIfNotAlready() }
     }
@@ -91,7 +103,7 @@ actual data class DocumentReference internal constructor(actual val path: String
         strategy: SerializationStrategy<T>,
         data: T,
         setOptions: SetOptions
-    ) = suspendCancellableCoroutine<Unit> { cont ->
+    ): Unit = suspendCancellableCoroutine { cont ->
         val cbor = Cbor.encodeToByteArray(strategy, data).toUByteArray()
         val ref = SafeRef.create(cont)
         val rc = fdb_fs_set(
@@ -101,28 +113,27 @@ actual data class DocumentReference internal constructor(actual val path: String
             if (setOptions is SetOptions.Merge) 1 else 0,
             ref.asCPointer(),
             staticCFunction { userdata, seq, payload, len ->
-                val ref = userdata!!.asSafeRef<CancellableContinuation<Unit>>()
-                val cont = ref.get()
-                ref.disposeIfNotAlready()
-                if (seq == 1L) cont.resume(Unit) { _, _, _ -> }
+                val cont = userdata!!.asSafeRef<CancellableContinuation<Unit>>()
+                    .also { it.disposeIfNotAlready() }
+                    .get()
+                if (seq > 0) cont.resume(Unit) { _, _, _ -> }
                 else {
-                    val bytes = payload?.readBytes(len.toInt())?.takeIf {
-                        it.isNotEmpty()
-                    }
+                    val bytes = payload?.readBytes(len.toInt())?.takeIf { it.isNotEmpty() }
                     cont.resumeWithException(
-                        decodeFirestoreException(
-                            bytes,
-                            "fdb_fs_set failed: seq=$seq"
-                        )
+                        decodeFirestoreException(bytes, "fdb_fs_set failed: seq=$seq")
                     )
                 }
             }
         )
-
-        if (rc != 0L) {
+        if (rc < 0) {
             ref.disposeIfNotAlready()
-            cont.resumeWithException(RuntimeException("fdb_fs_set returned $rc"))
-            return@suspendCancellableCoroutine
+            cont.resumeWithException(
+                when (rc) {
+                    -1L -> IllegalStateException("You must call Firebase.initialize first.")
+                    -3L -> RuntimeException("Cannot serialize received document.")
+                    else -> RuntimeException("Error during set: fdb_fs_set returned $rc")
+                }
+            )
         }
         cont.invokeOnCancellation { ref.disposeIfNotAlready() }
     }
