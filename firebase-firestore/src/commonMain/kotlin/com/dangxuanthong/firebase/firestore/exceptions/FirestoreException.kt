@@ -3,12 +3,12 @@ package com.dangxuanthong.firebase.firestore.exceptions
 import com.dangxuanthong.firebase.core.exceptions.FirebaseException
 
 /** A class of exceptions thrown by Cloud Firestore. */
-sealed class FirestoreException(message: String, cause: Throwable? = null) :
+sealed class FirestoreException(override val message: String, cause: Throwable? = null) :
     FirebaseException(message, cause) {
 
     /**
      * The operation completed successfully. `FirebaseFirestoreException` will never have a
-     * status of `OK`.
+     * status of `Ok`.
      */
     class Ok : FirestoreException("Ok")
 
@@ -21,9 +21,7 @@ sealed class FirestoreException(message: String, cause: Throwable? = null) :
         FirestoreException(message, cause)
 
     /**
-     * Client specified an invalid argument. Note that this differs from {@link
-     * #FAILED_PRECONDITION}. {@code INVALID_ARGUMENT} indicates arguments that are problematic
-     * regardless of the state of the system (like an invalid field name).
+     * Client specified an invalid argument.
      */
     class InvalidArgument(message: String, cause: Throwable? = null) :
         FirestoreException(message, cause)

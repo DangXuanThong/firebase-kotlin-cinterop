@@ -1,6 +1,6 @@
 package com.dangxuanthong.firebase.firestore
 
-import com.dangxuanthong.firebase.firestore.exceptions.decodeFirestoreException
+import com.dangxuanthong.firebase.firestore.exceptions.asFirestoreException
 import com.dangxuanthong.firebase.firestore.utils.suspendNativeCall
 import com.dangxuanthong.firebase.firestore.utils.useAsStableRef
 import fdb.fdb_fs_delete
@@ -8,7 +8,6 @@ import fdb.fdb_fs_get
 import fdb.fdb_fs_listen
 import fdb.fdb_fs_set
 import fdb.fdb_fs_unlisten
-import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.readBytes
@@ -21,7 +20,6 @@ import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.cbor.Cbor
 
-@OptIn(ExperimentalAtomicApi::class)
 @ConsistentCopyVisibility
 actual data class DocumentReference internal constructor(actual val path: String) {
 
@@ -30,27 +28,26 @@ actual data class DocumentReference internal constructor(actual val path: String
 
     actual val snapshots: Flow<DocumentSnapshot>
         get() = callbackFlow {
-            val ref = SafeRef.create(this)
+            val ref = StableRef.create(this)
             val listenerId = fdb_fs_listen(
                 path,
                 ref.asCPointer(),
                 staticCFunction { userdata, seq, payload, len ->
-                    val producer = userdata!!.asSafeRef<ProducerScope<DocumentSnapshot>>().get()
-                    val bytes = payload?.readBytes(len.toInt())?.takeIf { it.isNotEmpty() }
-                    if (seq > 0) producer.trySend(DocumentSnapshot(bytes))
-                    else producer.close(
-                        decodeFirestoreException(bytes, "listener failed: seq=$seq")
-                    )
+                    userdata!!.useAsStableRef<ProducerScope<DocumentSnapshot>> {
+                        val bytes = payload?.readBytes(len.toInt())?.takeIf { it.isNotEmpty() }
+                        if (seq > 0) it.trySend(DocumentSnapshot(bytes))
+                        else it.close(bytes.asFirestoreException())
+                    }
                 }
             )
             if (listenerId < 0) {
-                ref.disposeIfNotAlready()
+                ref.dispose()
                 close(
                     when (listenerId) {
                         -1L -> IllegalStateException("You must call Firebase.initialize first.")
 
                         else -> RuntimeException(
-                            "Error during listen: fdb_fs_listen returned $listenerId"
+                            "Operation failed with unknown code: $listenerId."
                         )
                     }
                 )
@@ -58,7 +55,7 @@ actual data class DocumentReference internal constructor(actual val path: String
 
             awaitClose {
                 fdb_fs_unlisten(listenerId)
-                ref.disposeIfNotAlready()
+                ref.dispose()
             }
         }
 
