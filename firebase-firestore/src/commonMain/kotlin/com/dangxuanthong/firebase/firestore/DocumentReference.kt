@@ -81,20 +81,21 @@ expect class DocumentReference {
         setOptions: SetOptions = SetOptions.Merge
     )
 
-//    suspend fun updateEncoded(encodedData: EncodedObject)
-//
 //    suspend fun updateEncoded(encodedFieldsAndValues: List<FieldAndValue>)
 
-//    suspend inline fun <reified T : Any> set(
-//        data: T,
-//        merge: Boolean = false,
-//        buildSettings: EncodeSettings.Builder.() -> Unit = {}
-//    )
-//
-//    suspend inline fun <T : Any> update(
+//    Update operation is not supported at the moment because it relies on a `Map<String, Any?>`,
+//    which still don't have any ways to pass to C and decode it (the same for set operation for
+//    any SetOptions other than Merge)
+//    /**
+//     * Updates fields in the document referred to by this [DocumentReference]. If no document
+//     * exists yet, the update will fail.
+//     *
+//     * @param strategy The serialization strategy to use for encoding the data.
+//     * @param data The data to write to the document.
+//     */
+//    suspend fun <T : Any> update(
 //        strategy: SerializationStrategy<T>,
-//        data: T,
-//        buildSettings: EncodeSettings.Builder.() -> Unit = {}
+//        data: T
 //    )
 
 //    /**
@@ -115,3 +116,6 @@ suspend inline fun <reified T : Any> DocumentReference.set(
     data: T,
     setOptions: SetOptions = SetOptions.Merge
 ) = set(serializer(), data, setOptions)
+
+// suspend inline fun <reified T : Any> DocumentReference.update(data: T) =
+//    update(serializer(), data)
