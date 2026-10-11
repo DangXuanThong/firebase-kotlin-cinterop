@@ -5,9 +5,14 @@ import fdb.FdbCallback
 import kotlin.coroutines.resumeWithException
 import kotlinx.cinterop.COpaquePointer
 import kotlinx.cinterop.StableRef
+import kotlinx.cinterop.asStableRef
 import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.staticCFunction
 import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.channels.ProducerScope
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
@@ -31,17 +36,16 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  * val snapshot: DocumentSnapshot = suspendNativeCall(
  *     nativeFunction = { userdata, callback ->
  *         fdb_fs_get(doc_path = path, userdata, callback)
- *     },
- *     config = {
- *         onSuccess { bytes -> DocumentSnapshot(bytes) }
  *     }
- * )
+ * ) {
+ *     onSuccess { bytes -> DocumentSnapshot(bytes) }
+ * }
  * ```
  *
  * @param T The return type of the suspended operation.
  * @param nativeFunction A lambda providing `userdata` ([COpaquePointer]) and `callback` ([FdbCallback]) to be forwarded
  * to the native C function. The C function must return a `Long` status or return code (`rc`).
- * @param config Builder block for [NativeCallConfig]. Must invoke [NativeCallConfig.onSuccess].
+ * @param config Builder block for [SuspendNativeCallConfig]. Must invoke [NativeCallConfig.onSuccess].
  *
  * @return The parsed object of type [T] when the native callback completes successfully (`seq > 0`).
  *
@@ -51,42 +55,90 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  */
 suspend fun <T : Any> suspendNativeCall(
     nativeFunction: (userdata: COpaquePointer, callback: FdbCallback) -> Long,
-    config: NativeCallConfig<T>.() -> Unit
+    config: SuspendNativeCallConfig<T>.() -> Unit
 ): T = suspendCancellableCoroutine { cont ->
-    val nativeCallConfig = NativeCallConfig(cont).apply(config)
+    val nativeCallConfig = SuspendNativeCallConfig(cont).apply(config)
     require(nativeCallConfig.check()) { "onSuccess must be called inside NativeCallScope block" }
 
     val ref = StableRef.create(nativeCallConfig)
     val rc = nativeFunction(
         ref.asCPointer(),
         staticCFunction { userdata, seq, payload, len ->
-            userdata!!.useAsStableRef<NativeCallConfig<T>> { (cont, onSuccess, onFailure) ->
+            userdata!!.useAsStableRef<SuspendNativeCallConfig<T>> { config ->
                 val bytes = payload?.readBytes(len.toInt())?.takeIf { it.isNotEmpty() }
-                cont.resumeWith(
+                config.continuation.resumeWith(
                     runCatching {
-                        if (seq > 0) onSuccess(bytes)
-                        else throw onFailure(bytes, seq)
+                        if (seq > 0) config.success(bytes)
+                        else throw config.failure(bytes, seq)
                     }
                 )
             }
         }
     )
     if (rc < 0L) {
+        // return code < 0 means the request didn't get sent, so it's safe to dispose the reference
+        // since the callback will never be fired
         ref.dispose()
         cont.resumeWithException(nativeCallConfig.error(rc))
     }
 }
 
 /**
- * Configuration builder scope for [suspendNativeCall].
+ * Creates a [Flow] that streams continuous updates emitted by an asynchronous native C listener.
  *
- * Holds callbacks for mapping success payloads, failure sequences, and native return code errors.
+ * Manages the lifetime of the underlying [StableRef] until flow collection completes or is cancelled,
+ * at which point the [FlowNativeCallConfig.onCleanup] block (if configured)
+ * is executed to unregister the listener.
  *
- * @param T The expected return type of the suspend operation.
+ * @param T The item type emitted by the flow.
+ * @param nativeFunction A lambda providing `userdata` ([COpaquePointer]) and `callback`
+ * ([FdbCallback]) to be forwarded to the native C function.
+ * @param config Builder block for [FlowNativeCallConfig]. Must invoke [NativeCallConfig.onSuccess]
+ * and optionally [FlowNativeCallConfig.onCleanup].
+ *
+ * @return A cold [Flow] emitting items of type [T].
  */
-class NativeCallConfig<T> internal constructor(
-    internal val continuation: CancellableContinuation<T>
-) {
+fun <T : Any> flowNativeCall(
+    nativeFunction: (userdata: COpaquePointer, callback: FdbCallback) -> Long,
+    config: FlowNativeCallConfig<T>.() -> Unit
+): Flow<T> = callbackFlow {
+    val nativeCallConfig = FlowNativeCallConfig(this).apply(config)
+    require(nativeCallConfig.check()) { "onSuccess must be called inside NativeCallScope block" }
+
+    val ref = StableRef.create(nativeCallConfig)
+    val rc = nativeFunction(
+        ref.asCPointer(),
+        staticCFunction { userdata, seq, payload, len ->
+            val config = userdata!!.asStableRef<FlowNativeCallConfig<T>>().get()
+            val bytes = payload?.readBytes(len.toInt())?.takeIf { it.isNotEmpty() }
+            if (seq > 0)
+                config.scope.runCatching { config.success(bytes) }
+                    .onSuccess { trySend(it) }
+                    .onFailure { close(it) }
+            else config.scope.close(config.failure(bytes, seq))
+        }
+    )
+
+    if (rc < 0L) {
+        // return code < 0 means the request didn't get sent, so it's safe to dispose the reference
+        // since the callback will never be fired
+        ref.dispose()
+        close(nativeCallConfig.error(rc))
+    } else awaitClose {
+        nativeCallConfig.cleanup(rc)
+        ref.dispose()
+    }
+}
+
+/**
+ * Base sealed class for configuring native calls.
+ *
+ * Holds common mapping callbacks for success payloads, failure sequence codes,
+ * and immediate native error return codes.
+ *
+ * @param T The expected return or item type.
+ */
+sealed class NativeCallConfig<T> {
     internal lateinit var success: (ByteArray?) -> T
         private set
     internal var failure: (ByteArray?, Long) -> Throwable = { bytes, _ ->
@@ -104,9 +156,9 @@ class NativeCallConfig<T> internal constructor(
     /**
      * Registers the success transformation lambda.
      *
-     * **MANDATORY:** This function **must** be called inside the `config` block of [suspendNativeCall].
+     * **MANDATORY:** This function **must** be called inside the configuration block.
      *
-     * @param block A lambda that transforms the raw `ByteArray?` payload into the result object [T].
+     * @param block A lambda transforming raw `ByteArray?` payload into the result object [T].
      */
     fun onSuccess(block: (bytes: ByteArray?) -> T) {
         success = block
@@ -115,7 +167,7 @@ class NativeCallConfig<T> internal constructor(
     /**
      * Registers a custom failure handler for asynchronous native errors (`seq <= 0`).
      *
-     * If not called, defaults to decoding the Firestore exception payload using [ByteArray.asFirestoreException].
+     * Defaults to decoding the Firestore exception payload using [ByteArray.asFirestoreException].
      *
      * @param block A lambda mapping raw payload bytes and sequence code `Long` to a [Throwable].
      */
@@ -126,15 +178,42 @@ class NativeCallConfig<T> internal constructor(
     /**
      * Registers a custom error handler for immediate native return code errors (`rc < 0`).
      *
-     * @param block A lambda mapping the return code `Long` to a [Throwable].
+     * @param block A lambda mapping return code `Long` to a [Throwable].
      */
     fun onError(block: (rc: Long) -> Throwable) {
         error = block
     }
 
     internal fun check() = ::success.isInitialized
+}
 
-    internal operator fun component1() = continuation
-    internal operator fun component2() = success
-    internal operator fun component3() = failure
+/**
+ * Configuration builder scope for one-shot [suspendNativeCall] operations.
+ *
+ * @param T The expected return type of the suspend operation.
+ */
+class SuspendNativeCallConfig<T> internal constructor(
+    internal val continuation: CancellableContinuation<T>
+) : NativeCallConfig<T>()
+
+/**
+ * Configuration builder scope for streaming [flowNativeCall] operations.
+ *
+ * @param T The item type emitted by the flow.
+ */
+class FlowNativeCallConfig<T> internal constructor(internal val scope: ProducerScope<T>) :
+    NativeCallConfig<T>() {
+
+    internal var cleanup: (Long) -> Unit = {}
+        private set
+
+    /**
+     * Registers a cleanup handler to unregister/stop the native listener when the flow
+     * completes or is cancelled.
+     *
+     * @param block A lambda called with the listener handle (`Long`) returned by the native function.
+     */
+    fun onCleanup(block: (handle: Long) -> Unit) {
+        cleanup = block
+    }
 }

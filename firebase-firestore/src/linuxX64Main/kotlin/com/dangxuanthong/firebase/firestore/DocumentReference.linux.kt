@@ -1,22 +1,15 @@
 package com.dangxuanthong.firebase.firestore
 
-import com.dangxuanthong.firebase.firestore.exceptions.asFirestoreException
+import com.dangxuanthong.firebase.firestore.utils.flowNativeCall
 import com.dangxuanthong.firebase.firestore.utils.suspendNativeCall
-import com.dangxuanthong.firebase.firestore.utils.useAsStableRef
 import fdb.fdb_fs_delete
 import fdb.fdb_fs_get
 import fdb.fdb_fs_listen
 import fdb.fdb_fs_set
 import fdb.fdb_fs_unlisten
-import kotlinx.cinterop.StableRef
 import kotlinx.cinterop.convert
-import kotlinx.cinterop.readBytes
 import kotlinx.cinterop.refTo
-import kotlinx.cinterop.staticCFunction
-import kotlinx.coroutines.channels.ProducerScope
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.cbor.Cbor
 
@@ -27,36 +20,13 @@ actual data class DocumentReference internal constructor(actual val path: String
         get() = path.substringAfterLast('/')
 
     actual val snapshots: Flow<DocumentSnapshot>
-        get() = callbackFlow {
-            val ref = StableRef.create(this)
-            val listenerId = fdb_fs_listen(
-                path,
-                ref.asCPointer(),
-                staticCFunction { userdata, seq, payload, len ->
-                    userdata!!.useAsStableRef<ProducerScope<DocumentSnapshot>> {
-                        val bytes = payload?.readBytes(len.toInt())?.takeIf { it.isNotEmpty() }
-                        if (seq > 0) it.trySend(DocumentSnapshot(bytes))
-                        else it.close(bytes.asFirestoreException())
-                    }
-                }
-            )
-            if (listenerId < 0) {
-                ref.dispose()
-                close(
-                    when (listenerId) {
-                        -1L -> IllegalStateException("You must call Firebase.initialize first.")
-
-                        else -> RuntimeException(
-                            "Operation failed with unknown code: $listenerId."
-                        )
-                    }
-                )
+        get() = flowNativeCall(
+            nativeFunction = { userdata, callback ->
+                fdb_fs_listen(doc_path = path, userdata, callback)
             }
-
-            awaitClose {
-                fdb_fs_unlisten(listenerId)
-                ref.dispose()
-            }
+        ) {
+            onSuccess { DocumentSnapshot(it) }
+            onCleanup { fdb_fs_unlisten(listener_id = it) }
         }
 
     actual val parent: CollectionReference

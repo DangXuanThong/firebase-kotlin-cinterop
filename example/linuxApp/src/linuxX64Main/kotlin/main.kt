@@ -9,9 +9,10 @@ fun main(): Unit = runBlocking {
     Firebase.initialize(path = "google-services.json")
     val db = FirebaseFirestore()
     try {
-        val doc = db.collection("cinterop_test").document("test1").get()
-        println("exists=${doc.exists}")
-        println(doc.data<TestDoc>())
+        db.collection("cinterop_test").document("test1").snapshots
+            .collect {
+                println(it.data<TestDoc>())
+            }
     } catch (e: FirestoreException) {
         println("${e::class.simpleName}: ${e.message}")
     }
