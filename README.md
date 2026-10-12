@@ -1,100 +1,162 @@
-<!-- SPDX-FileCopyrightText: 2026 Joel Winarske -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
+# firebase-kotlin-cinterop
 
-# firebase_ffi
+Kotlin Multiplatform (KMP) Firebase SDK supporting **Android** and **Linux (`linuxX64`)** via Kotlin/Native `cinterop` and the Firebase C++ SDK.
 
-Firebase for Dart and Flutter through a single FFI code asset, with no platform
-channel and no embedder plugin. Built for embedded Linux, where the official
-plugins have no implementation.
+Built specifically for **Linux (`linuxX64`)** desktop and embedded applications (where official Firebase Kotlin / Android SDKs lack native target support), while providing a unified KMP API matching standard Kotlin Firebase libraries on Android.
 
-| package | |
-| --- | --- |
-| [`firebase_ffi`](packages/firebase_ffi) | The native library and its own Dart API: Authentication, Realtime Database, Cloud Firestore, Cloud Storage, Cloud Functions, Remote Config and App Check. Pure Dart — no Flutter dependency. |
-| [`firebase_core_ffi`](packages/firebase_core_ffi) | `firebase_core` for Linux. Everything else registers through it. |
-| [`firebase_auth_ffi`](packages/firebase_auth_ffi) | `firebase_auth` for Linux: anonymous and custom-token sign-in. |
-| [`firebase_storage_ffi`](packages/firebase_storage_ffi) | `firebase_storage` for Linux: objects, metadata, download URLs. |
-| [`cloud_firestore_ffi`](packages/cloud_firestore_ffi) | `cloud_firestore` for Linux: documents, with the tagged value types. |
-| [`cloud_functions_ffi`](packages/cloud_functions_ffi) | `cloud_functions` for Linux: callables by name. |
-| [`firebase_remote_config_ffi`](packages/firebase_remote_config_ffi) | `firebase_remote_config` for Linux: defaults, values and their source. |
-| [`firebase_app_check_ffi`](packages/firebase_app_check_ffi) | `firebase_app_check` for Linux: the debug provider, or a token the device supplies itself. |
-| [`firebase_database_ffi`](packages/firebase_database_ffi) | `firebase_database` for Linux: values, queries, child events, transactions, onDisconnect. |
+---
 
-The eight `*_ffi` packages implement FlutterFire's `*_platform_interface`
-contracts and register themselves on Linux, so an app depends on the ordinary
-plugins and its code does not change:
+## 🌟 Features
 
-```yaml
-dependencies:
-  firebase_core: ^4.0.0
-  cloud_firestore: ^6.0.0
-  firebase_core_ffi: ^0.1.0      # registers on Linux
-  cloud_firestore_ffi: ^0.1.0
+- **Kotlin Multiplatform (KMP)** API mirroring standard KMP Firebase libraries (`dev.gitlive.firebase`).
+- **Target Platforms**:
+  - **Android**: Delegates to `dev.gitlive.firebase` (GitLive Firebase SDK for Kotlin).
+  - **Linux (`linuxX64`)**: Binds directly to the native `libfirebase_ffi.so` C-shared library (built on the official Firebase C++ SDK) via Kotlin/Native `cinterop`.
+- **CBOR Binary Serialization**: Uses `kotlinx.serialization` (JSON / CBOR) for high-performance payload parsing on native Linux.
+- **Coroutines & Real-Time Flows**: 
+  - `suspendNativeCall`: Async coroutine suspension for single operations.
+  - `flowNativeCall`: Cold Kotlin `Flow` (`callbackFlow`) for continuous real-time Firestore listeners with automatic cleanup/unlistening on cancellation.
+- **`google-services.json` Config Parser**: Built-in `parseGoogleServicesConfig` to initialize Firebase directly from standard `google-services.json` configuration files without manual credential wiring.
+
+---
+
+## 📦 Modules
+
+| Module | Description | Targets |
+| --- | --- | --- |
+| **`:firebase-core`** | Core Firebase initialization (`Firebase.initialize`), `FirebaseApp`, `FirebaseOptions`, and `google-services.json` config parsing. | `android`, `linuxX64` |
+| **`:firebase-firestore`** | Cloud Firestore database API (`Firebase.firestore`, `DocumentReference`, `DocumentSnapshot`, `CollectionReference`, real-time `snapshots` flow, Kotlin `serializer()` data mapping). | `android`, `linuxX64` |
+
+---
+
+## 🚀 Quick Start
+
+### 1. Dependency Setup
+
+Add the modules to your KMP project's `build.gradle.kts`:
+
+```kotlin
+kotlin {
+    sourceSets {
+        commonMain.dependencies {
+            implementation(projects.firebaseCore)
+            implementation(projects.firebaseFirestore)
+            implementation(libs.kotlinx.serialization.json)
+        }
+    }
+}
 ```
 
-```dart
-await Firebase.initializeApp(options: /* … */);
-await FirebaseFirestore.instance.doc('probe/one').set({'hello': 'world'});
+### 2. Initializing Firebase
+
+On **Linux (`linuxX64`)**, you can initialize Firebase directly from a `google-services.json` file:
+
+```kotlin
+import com.dangxuanthong.firebase.core.Firebase
+import com.dangxuanthong.firebase.core.initialize
+import com.dangxuanthong.firebase.firestore.firestore
+
+fun main() {
+    // Initialize from google-services.json
+    Firebase.initialize(path = "google-services.json")
+
+    val db = Firebase.firestore
+    // ...
+}
 ```
 
-Anything not bound throws the platform interface's own `UnimplementedError`,
-naming the method — so what is missing says so rather than being silently
-absent. Firestore's queries, cursors, transactions, batches, sentinels and
-aggregates are all there; what is still unbound is walked through by each
-package's example tour — Storage listing, streaming callables, Remote Config's
-update listener, Firestore's offline persistence and bundles, and the
-Database's exclusive cursors.
+On **Android**, pass your application `Context` and configuration:
 
-The Firebase C++ SDK is linked into one shared library that Dart calls
-directly, so every product shares one `firebase::App` and one credential.
-Products are opt-in per app: an app that does not name Firestore does not carry
-its 23 MB of gRPC, protobuf and abseil.
+```kotlin
+import com.dangxuanthong.firebase.core.Firebase
+import com.dangxuanthong.firebase.core.initialize
+import com.dangxuanthong.firebase.core.parseGoogleServicesConfig
+import com.dangxuanthong.firebase.firestore.firestore
 
-See [`packages/firebase_ffi/README.md`](packages/firebase_ffi/README.md) for
-usage, the API, platform support and how the SDK is built.
+val config = parseGoogleServicesConfig(jsonText)
+Firebase.initialize(context, config)
 
-## Examples
-
-| | |
-| --- | --- |
-| [`example/`](example) | One Flutter window over all eight products: sign in, browse and edit both databases, move objects in and out of Storage, call a function, read Remote Config, mint an App Check token. `flutter run -d linux` |
-| [`packages/firebase_ffi/example/`](packages/firebase_ffi/example) | The binding directly, one program per product. `dart run example/firestore.dart` |
-| `packages/*_ffi/example/` | The smallest app that reaches the SDK, and a tour of what that package binds and what it does not. `flutter run -d linux`, `flutter test` |
-
-All of it runs against the local emulator suite with no project and no
-credentials, or against whatever `google-services.json` names.
-
-## Repository layout
-
-The packages depend on each other by version, as they must to be published,
-and a `pubspec_overrides.yaml` beside each one points those constraints at the
-sibling in this checkout. So a change to `firebase_ffi` is seen by the rest
-without publishing anything, and pub still sees ordinary constraints. The
-override files are read only when a package is the root; they never reach a
-consumer.
-
-`firebase_ffi` is pure Dart and must stay that way: a command-line consumer
-should not inherit Flutter to write a byte to the Realtime Database.
-Implementing the platform interfaces requires Flutter, so the implementations
-are separate packages rather than libraries inside one. They all share the
-single native library, and therefore one `firebase::App` and one credential.
-
-## Testing
-
-CI runs the bindings and the façade against the Firebase emulator suite on
-every pull request, which is the only part of this that exercises a real
-backend without credentials:
-
-```
-scripts/run_emulator_tests.sh          # the bindings
-scripts/run_facade_emulator_tests.sh   # firebase_auth and cloud_firestore
+val db = Firebase.firestore
 ```
 
-Storage reaches the emulator too, through `useStorageEmulator`: the façade
-suite above uploads, downloads, reads metadata and takes a download URL from
-it. What the emulator cannot answer for is a real bucket's behaviour — its
-tokens, its rules, its quotas — so the live round trip is still there, run by
-hand with `FDB_LIVE_STORAGE=1`.
+---
 
-## License
+## 📖 Usage Examples
+
+### Data Model
+
+```kotlin
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class TestDoc(val message: String)
+```
+
+### Document Fetching (`suspend`)
+
+```kotlin
+val docSnapshot = Firebase.firestore
+    .collection("cinterop_test")
+    .document("test1")
+    .get(Source.SERVER)
+
+if (docSnapshot.exists) {
+    val data: TestDoc = docSnapshot.data()
+    println("Message: ${data.message}")
+}
+```
+
+### Real-Time Document Snapshots (`Flow`)
+
+```kotlin
+import com.dangxuanthong.firebase.firestore.data
+import com.dangxuanthong.firebase.firestore.firestore
+
+suspend fun observeDocument() {
+    val db = Firebase.firestore
+
+    db.collection("cinterop_test")
+        .document("test1")
+        .snapshots
+        .collect { snapshot ->
+            if (snapshot.exists) {
+                val doc = snapshot.data<TestDoc>()
+                println("Document updated: ${doc.message}")
+            }
+        }
+}
+```
+
+---
+
+## 🛠 Repository Layout
+
+```
+├── firebase-core/          # KMP Firebase Core module (Android & linuxX64)
+├── firebase-firestore/     # KMP Cloud Firestore module (Android & linuxX64)
+│   └── src/linuxX64Main/   # cinterop bindings (NativeCall.kt, CBOR decoding)
+├── packages/firebase_ffi/  # Native C/C++ FFI library (Firebase C++ SDK wrapper)
+└── example/
+    ├── shared/             # KMP shared example & Android device tests
+    └── linuxApp/           # Executable Linux app (linuxX64)
+```
+
+---
+
+## 🔧 Building Native C-Interop (`linuxX64`)
+
+The `linuxX64` target links against `libfirebase_ffi.so` built from `packages/firebase_ffi/native`.
+
+Before building the `linuxX64` target in Gradle, ensure `libfirebase_ffi.so` exists in `packages/firebase_ffi/native/build/`. The Gradle task `cinteropFdbLinuxX64` automatically generates `fdb.def` and configures the linker flags (`-lfirebase_ffi`).
+
+---
+
+## 🙏 Acknowledgements & Credits
+
+This project builds upon the native C/C++ FFI bridge layer (`packages/firebase_ffi/native`) originally authored by **Joel Winarske** ([@jwinarske](https://github.com/jwinarske)) in the [`firebase_ffi`](https://github.com/jwinarske/firebase_ffi) repository. Special thanks to Joel Winarske for creating the underlying C++ wrapper for the Firebase C++ SDK on Embedded Linux.
+
+---
+
+## 📄 License
 
 Apache 2.0. See [LICENSE](LICENSE).
