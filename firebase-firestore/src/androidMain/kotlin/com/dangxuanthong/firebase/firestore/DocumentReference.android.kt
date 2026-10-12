@@ -27,7 +27,7 @@ actual class DocumentReference internal constructor(private val delegate: RealDo
 
     actual suspend fun get(source: Source): DocumentSnapshot =
         try {
-            delegate.get(source.toRealSource()).let { DocumentSnapshot(it) }
+            DocumentSnapshot(delegate.get(source.toRealSource()))
         } catch (e: FirebaseFirestoreException) {
             throw e.toFirestoreException()
         }
