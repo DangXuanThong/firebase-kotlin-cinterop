@@ -4,10 +4,6 @@ package com.dangxuanthong.firebase.firestore
  * Mirroring `dev.gitlive.firebase.firestore.SnapshotMetadata`
  *
  * Metadata about a snapshot, describing the state of the snapshot.
- *
- * **Subclassing Note**: Cloud Firestore classes are not meant to be subclassed except for use
- * in test mocks. Subclassing is not supported in production code and new SDK releases may break
- * code that does so.
  */
 data class SnapshotMetadata(
     /**

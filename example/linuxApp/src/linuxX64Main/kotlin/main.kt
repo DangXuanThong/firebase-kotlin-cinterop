@@ -2,7 +2,6 @@ import com.dangxuanthong.firebase.core.Firebase
 import com.dangxuanthong.firebase.firestore.FirebaseFirestore
 import com.dangxuanthong.firebase.firestore.data
 import com.dangxuanthong.firebase.firestore.exceptions.FirestoreException
-import com.dangxuanthong.firebase.firestore.set
 import kotlinx.coroutines.runBlocking
 
 fun main(): Unit = runBlocking {

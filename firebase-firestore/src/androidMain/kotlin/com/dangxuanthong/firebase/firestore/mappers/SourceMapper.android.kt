@@ -1,5 +1,6 @@
-package com.dangxuanthong.firebase.firestore
+package com.dangxuanthong.firebase.firestore.mappers
 
+import com.dangxuanthong.firebase.firestore.Source
 import dev.gitlive.firebase.firestore.Source as RealSource
 
 fun Source.toRealSource() = when (this) {

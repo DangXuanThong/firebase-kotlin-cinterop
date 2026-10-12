@@ -1,5 +1,6 @@
-package com.dangxuanthong.firebase.firestore.exceptions
+package com.dangxuanthong.firebase.firestore.mappers
 
+import com.dangxuanthong.firebase.firestore.exceptions.FirestoreException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.cbor.Cbor
 import kotlinx.serialization.decodeFromByteArray
@@ -14,13 +15,13 @@ import kotlinx.serialization.decodeFromByteArray
 private data class ErrorPayload(val code: Int, val message: String)
 
 /**
- * Decodes a CBOR-encoded error byte array received from the native layer into a [FirestoreException].
+ * Decodes a CBOR-encoded error byte array received from the native layer into a [com.dangxuanthong.firebase.firestore.exceptions.FirestoreException].
  *
- * - If `this` is `null`, returns [FirestoreException.Unknown] indicating no error payload was provided.
- * - Decodes CBOR bytes into [ErrorPayload] and converts its status code using [FirestoreException.fromCode].
- * - If decoding fails (e.g., malformed payload), returns [FirestoreException.Internal] wrapping the exception.
+ * - If `this` is `null`, returns [com.dangxuanthong.firebase.firestore.exceptions.FirestoreException.Unknown] indicating no error payload was provided.
+ * - Decodes CBOR bytes into [ErrorPayload] and converts its status code using [com.dangxuanthong.firebase.firestore.exceptions.FirestoreException.Companion.fromCode].
+ * - If decoding fails (e.g., malformed payload), returns [com.dangxuanthong.firebase.firestore.exceptions.FirestoreException.Internal] wrapping the exception.
  *
- * @return The mapped [FirestoreException] instance.
+ * @return The mapped [com.dangxuanthong.firebase.firestore.exceptions.FirestoreException] instance.
  */
 internal fun ByteArray?.asFirestoreException(): FirestoreException {
     if (this == null) return FirestoreException.Unknown("No error payload received")

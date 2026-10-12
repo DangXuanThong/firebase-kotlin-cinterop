@@ -25,7 +25,14 @@ actual data class DocumentReference internal constructor(actual val path: String
                 fdb_fs_listen(doc_path = path, userdata, callback)
             }
         ) {
-            onSuccess { DocumentSnapshot(it) }
+            onSuccess {
+                DocumentSnapshot(
+                    id = id,
+                    reference = this@DocumentReference,
+                    metadata = SnapshotMetadata(hasPendingWrites = false, isFromCache = false),
+                    cborBytes = it
+                )
+            }
             onCleanup { fdb_fs_unlisten(listener_id = it) }
         }
 
@@ -41,7 +48,16 @@ actual data class DocumentReference internal constructor(actual val path: String
     // Keep Source here since I think I'll implement caching in future
     actual suspend fun get(source: Source): DocumentSnapshot = suspendNativeCall(
         nativeFunction = { userdata, callback -> fdb_fs_get(doc_path = path, userdata, callback) }
-    ) { onSuccess { DocumentSnapshot(it) } }
+    ) {
+        onSuccess {
+            DocumentSnapshot(
+                id = id,
+                reference = this@DocumentReference,
+                metadata = SnapshotMetadata(hasPendingWrites = false, isFromCache = false),
+                cborBytes = it
+            )
+        }
+    }
 
     actual suspend fun <T : Any> set(
         strategy: SerializationStrategy<T>,

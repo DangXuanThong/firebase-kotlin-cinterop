@@ -1,6 +1,6 @@
 package com.dangxuanthong.firebase.firestore.utils
 
-import com.dangxuanthong.firebase.firestore.exceptions.asFirestoreException
+import com.dangxuanthong.firebase.firestore.mappers.asFirestoreException
 import fdb.FdbCallback
 import kotlin.coroutines.resumeWithException
 import kotlinx.cinterop.COpaquePointer
@@ -111,10 +111,12 @@ fun <T : Any> flowNativeCall(
         staticCFunction { userdata, seq, payload, len ->
             val config = userdata!!.asStableRef<FlowNativeCallConfig<T>>().get()
             val bytes = payload?.readBytes(len.toInt())?.takeIf { it.isNotEmpty() }
-            if (seq > 0)
-                config.scope.runCatching { config.success(bytes) }
+            if (seq > 0) with(config.scope) {
+                // override the outer ProducerScope<T>
+                runCatching { config.success(bytes) }
                     .onSuccess { trySend(it) }
                     .onFailure { close(it) }
+            }
             else config.scope.close(config.failure(bytes, seq))
         }
     )
@@ -167,7 +169,7 @@ sealed class NativeCallConfig<T> {
     /**
      * Registers a custom failure handler for asynchronous native errors (`seq <= 0`).
      *
-     * Defaults to decoding the Firestore exception payload using [ByteArray.asFirestoreException].
+     * Defaults to decoding the Firestore exception payload using [asFirestoreException].
      *
      * @param block A lambda mapping raw payload bytes and sequence code `Long` to a [Throwable].
      */

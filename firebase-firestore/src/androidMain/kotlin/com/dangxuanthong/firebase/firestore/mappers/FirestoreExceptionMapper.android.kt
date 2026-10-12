@@ -1,5 +1,6 @@
-package com.dangxuanthong.firebase.firestore.exceptions
+package com.dangxuanthong.firebase.firestore.mappers
 
+import com.dangxuanthong.firebase.firestore.exceptions.FirestoreException
 import dev.gitlive.firebase.firestore.FirebaseFirestoreException as RealFirestoreException
 
 internal fun RealFirestoreException.toFirestoreException() = FirestoreException.fromCode(
