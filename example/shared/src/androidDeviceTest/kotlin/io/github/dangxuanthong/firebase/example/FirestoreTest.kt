@@ -1,0 +1,29 @@
+package io.github.dangxuanthong.firebase.example
+
+import TestDoc
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import io.github.dangxuanthong.firebase.core.Firebase
+import io.github.dangxuanthong.firebase.core.parseGoogleServicesConfig
+import io.github.dangxuanthong.firebase.firestore.Source
+import io.github.dangxuanthong.firebase.firestore.data
+import io.github.dangxuanthong.firebase.firestore.firestore
+import kotlinx.coroutines.test.runTest
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class FirestoreTest {
+    @Test
+    fun readsDocument() = runTest {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val jsonText = context.assets.open("google-services.json").bufferedReader().readText()
+        val config = parseGoogleServicesConfig(jsonText)
+
+        Firebase.initialize(context, config)
+        val db = Firebase.firestore
+        val doc = db.collection("cinterop_test").document("hello").get(Source.SERVER)
+        assert(doc.exists)
+        assert(doc.data<TestDoc>().message == "hello from C++")
+    }
+}

@@ -52,9 +52,9 @@ kotlin {
 On **Linux (`linuxX64`)**, you can initialize Firebase directly from a `google-services.json` file:
 
 ```kotlin
-import com.dangxuanthong.firebase.core.Firebase
-import com.dangxuanthong.firebase.core.initialize
-import com.dangxuanthong.firebase.firestore.firestore
+import io.github.dangxuanthong.firebase.core.Firebase
+import io.github.dangxuanthong.firebase.core.initialize
+import io.github.dangxuanthong.firebase.firestore.firestore
 
 fun main() {
     // Initialize from google-services.json
@@ -68,10 +68,10 @@ fun main() {
 On **Android**, pass your application `Context` and configuration:
 
 ```kotlin
-import com.dangxuanthong.firebase.core.Firebase
-import com.dangxuanthong.firebase.core.initialize
-import com.dangxuanthong.firebase.core.parseGoogleServicesConfig
-import com.dangxuanthong.firebase.firestore.firestore
+import io.github.dangxuanthong.firebase.core.Firebase
+import io.github.dangxuanthong.firebase.core.initialize
+import io.github.dangxuanthong.firebase.core.parseGoogleServicesConfig
+import io.github.dangxuanthong.firebase.firestore.firestore
 
 val config = parseGoogleServicesConfig(jsonText)
 Firebase.initialize(context, config)
@@ -109,8 +109,8 @@ if (docSnapshot.exists) {
 ### Real-Time Document Snapshots (`Flow`)
 
 ```kotlin
-import com.dangxuanthong.firebase.firestore.data
-import com.dangxuanthong.firebase.firestore.firestore
+import io.github.dangxuanthong.firebase.firestore.data
+import io.github.dangxuanthong.firebase.firestore.firestore
 
 suspend fun observeDocument() {
     val db = Firebase.firestore
@@ -153,7 +153,10 @@ Before building the `linuxX64` target in Gradle, ensure `libfirebase_ffi.so` exi
 
 ## 🙏 Acknowledgements & Credits
 
-This project builds upon the native C/C++ FFI bridge layer (`packages/firebase_ffi/native`) originally authored by **Joel Winarske** ([@jwinarske](https://github.com/jwinarske)) in the [`firebase_ffi`](https://github.com/jwinarske/firebase_ffi) repository. Special thanks to Joel Winarske for creating the underlying C++ wrapper for the Firebase C++ SDK on Embedded Linux.
+This project builds upon and integrates work from the following open-source projects:
+
+- **Joel Winarske** ([@jwinarske](https://github.com/jwinarske)): Author of the original [`firebase_ffi`](https://github.com/jwinarske/firebase_ffi) C/C++ FFI bridge layer (`packages/firebase_ffi/native`) wrapping the Firebase C++ SDK on Embedded Linux.
+- **GitLive** ([`GitLiveApp/firebase-kotlin-sdk`](https://github.com/GitLiveApp/firebase-kotlin-sdk)): Authors of the Firebase Kotlin SDK (`dev.gitlive.firebase`), which powers the Android target implementation and serves as the API design model for this library.
 
 ---
 

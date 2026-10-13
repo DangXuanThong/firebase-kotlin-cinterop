@@ -1,0 +1,48 @@
+package io.github.dangxuanthong.firebase.firestore
+
+import dev.gitlive.firebase.firestore.DocumentReference as RealDocumentReference
+import dev.gitlive.firebase.firestore.FirebaseFirestoreException
+import io.github.dangxuanthong.firebase.firestore.mappers.toFirestoreException
+import io.github.dangxuanthong.firebase.firestore.mappers.toRealSource
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.serialization.SerializationStrategy
+
+actual class DocumentReference internal constructor(private val delegate: RealDocumentReference) {
+
+    actual val id: String
+        get() = delegate.id
+    actual val path: String
+        get() = delegate.path
+    actual val snapshots: Flow<DocumentSnapshot>
+        get() = delegate.snapshots.map { DocumentSnapshot(it) }
+    actual val parent: CollectionReference
+        get() = CollectionReference(delegate.parent)
+
+    actual fun snapshots(includeMetadataChanges: Boolean): Flow<DocumentSnapshot> =
+        delegate.snapshots(includeMetadataChanges).map { DocumentSnapshot(it) }
+
+    actual fun collection(collectionPath: String): CollectionReference =
+        CollectionReference(delegate.collection(collectionPath))
+
+    actual suspend fun get(source: Source): DocumentSnapshot =
+        try {
+            DocumentSnapshot(delegate.get(source.toRealSource()))
+        } catch (e: FirebaseFirestoreException) {
+            throw e.toFirestoreException()
+        }
+
+    actual suspend fun <T : Any> set(
+        strategy: SerializationStrategy<T>,
+        data: T,
+        setOptions: SetOptions
+    ) = delegate.set(strategy, data, merge = setOptions is SetOptions.Merge) {}
+
+    actual suspend fun delete() = delegate.delete()
+
+    override fun equals(other: Any?): Boolean =
+        other is DocumentReference && delegate == other.delegate
+
+    override fun hashCode(): Int = delegate.hashCode()
+    override fun toString(): String = delegate.toString()
+}
