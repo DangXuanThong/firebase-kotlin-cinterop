@@ -26,7 +26,11 @@ kotlin {
         }
     }
 
-    linuxX64()
+    linuxX64 {
+        binaries {
+            executable { entryPoint = "main" }
+        }
+    }
 
     sourceSets {
         commonMain.dependencies {

@@ -97,7 +97,7 @@ data class TestDoc(val message: String)
 ```kotlin
 val docSnapshot = Firebase.firestore
     .collection("cinterop_test")
-    .document("test1")
+    .document("test")
     .get(Source.SERVER)
 
 if (docSnapshot.exists) {
@@ -116,7 +116,7 @@ suspend fun observeDocument() {
     val db = Firebase.firestore
 
     db.collection("cinterop_test")
-        .document("test1")
+        .document("test")
         .snapshots
         .collect { snapshot ->
             if (snapshot.exists) {
