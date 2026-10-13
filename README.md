@@ -151,6 +151,12 @@ Before building the `linuxX64` target in Gradle, ensure `libfirebase_ffi.so` exi
 
 ---
 
+## ⚠️ Known Issues
+
+- **Relative `google-services.json` File Resolution on Linux**: When using `Firebase.initialize(path = "google-services.json")` or `parseGoogleServicesConfig()`, the relative file path is resolved against the process's current working directory (where the terminal command/executable binary is launched from). If `google-services.json` is missing in that working directory, Okio will throw an `okio.FileNotFoundException`. To avoid this, either pass an absolute file path or ensure the working directory contains `google-services.json`. *(May be addressed in a future update).*
+
+---
+
 ## 🙏 Acknowledgements & Credits
 
 This project builds upon and integrates work from the following open-source projects:
