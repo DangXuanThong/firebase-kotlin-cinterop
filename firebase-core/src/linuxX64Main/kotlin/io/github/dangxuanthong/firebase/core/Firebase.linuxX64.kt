@@ -1,7 +1,6 @@
 package io.github.dangxuanthong.firebase.core
 
 import fdb.fdb_app_init
-import fdb.fdb_fs_init
 import io.github.dangxuanthong.firebase.core.exceptions.FirebaseException
 
 actual val Firebase.app: FirebaseApp
@@ -35,7 +34,6 @@ actual fun Firebase.initialize(context: Any?, options: FirebaseOptions, name: St
         options.storageBucket
     )
     if (rc != 0L) throw FirebaseException("fdb_app_init failed: $rc")
-    fdb_fs_init() // TODO: move into the firebase-firestore module
 
     return AppRegistry.publish(FirebaseApp(name, options))
 }
