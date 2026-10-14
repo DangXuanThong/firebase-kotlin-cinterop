@@ -23,7 +23,8 @@ mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release \
      -DFIREBASE_INCLUDE_LIBRARY_DEFAULT=OFF \
      -DFIREBASE_INCLUDE_AUTH=ON \
-     -DFIREBASE_INCLUDE_FIRESTORE=ON
+     -DFIREBASE_INCLUDE_FIRESTORE=ON \
+     -DFIREBASE_LINUX_USE_CXX11_ABI=ON
 
 # 4. Build target firebase_firestore in parallel
 echo "==> Step 4: Compiling Firebase targets..."
@@ -40,7 +41,9 @@ find build/ -name "*.a" -exec cp {} "$ABS_INSTALL_DIR/lib/" \;
 
 # 7. Copy App C++ include headers
 echo "==> Step 7: Copying App headers..."
-cp -r app/src/include/firebase "$ABS_INSTALL_DIR/include/"
+if [ -d "app/src/include/firebase" ]; then
+  cp -r app/src/include/firebase "$ABS_INSTALL_DIR/include/"
+fi
 
 # 8. Copy Auth C++ include headers
 echo "==> Step 8: Copying Auth headers..."
@@ -52,6 +55,9 @@ fi
 echo "==> Step 9: Copying Firestore headers..."
 if [ -d "firestore/src/include/firebase" ]; then
   cp -r firestore/src/include/firebase/* "$ABS_INSTALL_DIR/include/firebase/"
+fi
+if [ -d "build/external/src/firestore/Firestore/core/include/firebase" ]; then
+  cp -r build/external/src/firestore/Firestore/core/include/firebase/* "$ABS_INSTALL_DIR/include/firebase/"
 fi
 
 # 10. Remove $WORK_DIR directory
