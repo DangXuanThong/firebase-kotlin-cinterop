@@ -64,45 +64,7 @@ kotlin {
 }
 
 mavenPublishing {
-    publishToMavenCentral()
-
-    signAllPublications()
-
-    coordinates(
-        groupId = providers.gradleProperty("groupId").get(),
-        artifactId = "core",
-        version = providers.gradleProperty("version").get()
-    )
-
-    pom {
-        name = "firebase-kotlin-cinterop"
-        description = "Kotlin Multiplatform (KMP) Firebase SDK supporting Android and Linux(X64) " +
-            "via Kotlin/Native cinterop and the Firebase C++ SDK."
-        url = "https://github.com/dangxuanthong/firebase-kotlin-cinterop"
-        inceptionYear = "2026"
-        licenses {
-            license {
-                name.set("The Apache License, Version 2.0")
-                url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
-                distribution.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
-            }
-        }
-        developers {
-            developer {
-                id = "dangxuanthong"
-                name = "Dang Xuan Thong"
-                email = "dangxuanthongvn@gmail.com"
-                organization = "Dang Xuan Thong"
-                organizationUrl = "https://github.com/dangxuanthong"
-            }
-        }
-        scm {
-            url = "https://github.com/dangxuanthong/firebase-kotlin-cinterop"
-            connection = "scm:git:git://github.com/dangxuanthong/firebase-kotlin-cinterop.git"
-            developerConnection =
-                "scm:git:ssh://git@github.com/dangxuanthong/firebase-kotlin-cinterop.git"
-        }
-    }
+    coordinates(artifactId = "core")
 }
 
 val generateFdbDef = tasks.register("generateFdbDef") {

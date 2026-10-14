@@ -34,7 +34,9 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(projects.firebaseFirestore)
+            implementation(
+                "io.github.dangxuanthong.firebase:firestore:${project.property("VERSION_NAME")}"
+            )
             implementation(libs.kotlinx.serialization.json)
         }
         named("androidDeviceTest").dependencies {

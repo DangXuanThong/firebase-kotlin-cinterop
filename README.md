@@ -39,8 +39,7 @@ Add the modules to your KMP project's `build.gradle.kts`:
 kotlin {
     sourceSets {
         commonMain.dependencies {
-            implementation(projects.firebaseCore)
-            implementation(projects.firebaseFirestore)
+            implementation("io.github.dangxuanthong.firebase:firestore:0.0.2")
             implementation(libs.kotlinx.serialization.json)
         }
     }
