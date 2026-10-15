@@ -13,7 +13,7 @@ struct NativeApp {
 
 extern "C" {
 
-NativeAppOptions* appOptions_create(
+NativeAppOptions* AppOptions_create(
     const char* app_id,
     const char* api_key,
     const char* fcm_sender_id,
@@ -35,17 +35,18 @@ NativeAppOptions* appOptions_create(
   return options;
 }
 
-NativeAppOptions* appOptions_from_json(const char* config) {
-  if (!config) return nullptr;
+NativeAppOptions* AppOptions_fromJson(const char* config) {
+  if (!config || config[0] == '\0') return nullptr;
   auto* options = new NativeAppOptions();
-  if (!AppOptions::LoadFromJsonConfig(config, &options->delegate)) {
+  const auto* result = AppOptions::LoadFromJsonConfig(config, &options->delegate);
+  if (!result) {
     delete options;
     return nullptr;
   }
   return options;
 }
 
-void appOptions_destroy(NativeAppOptions* options) {
+void AppOptions_destroy(NativeAppOptions* options) {
   if (options) delete options;
 }
 

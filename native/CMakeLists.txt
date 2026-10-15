@@ -36,6 +36,6 @@ target_link_libraries(firebase_native PRIVATE
     dl
 )
 
-# Build C test executable
-add_executable(testc test/test.c)
-target_link_libraries(testc PRIVATE firebase_native)
+# Build C++ test executable
+add_executable(test_main test/main.cpp test/test_app_options.cpp)
+target_link_libraries(test_main PRIVATE firebase_native)

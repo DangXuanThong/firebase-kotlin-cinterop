@@ -8,7 +8,7 @@ extern "C" {
 typedef struct NativeAppOptions NativeAppOptions; // Wrapper of firebase::AppOptions
 typedef struct NativeApp NativeApp; // Wrapper of firebase::App
 
-NativeAppOptions* appOptions_create(
+NativeAppOptions* AppOptions_create(
     const char* app_id,
     const char* api_key,
     const char* fcm_sender_id,
@@ -18,9 +18,9 @@ NativeAppOptions* appOptions_create(
     const char* project_id
 );
 
-NativeAppOptions* appOptions_from_json(const char* config);
+NativeAppOptions* AppOptions_fromJson(const char* config);
 
-void appOptions_destroy(NativeAppOptions* options);
+void AppOptions_destroy(NativeAppOptions* options);
 
 #ifdef __cplusplus
 }

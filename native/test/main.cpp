@@ -1,0 +1,27 @@
+#include <iostream>
+#include "test_helpers.h"
+
+using namespace std;
+
+int failed_count = 0;
+
+void run_app_options_tests();
+
+int main() {
+    cout << "=========================================\n";
+    cout << " 🧪 C COMPAT LAYER UNIT TEST SUITE (C++)\n";
+    cout << "=========================================\n";
+
+    run_app_options_tests();
+
+    cout << "\n=========================================\n";
+    if (failed_count == 0) {
+        cout << "   ALL TESTS PASSED SUCCESSFULLY!\n";
+        cout << "=========================================\n";
+        return 0;
+    } else {
+        cout << " ❌ " << failed_count << " TEST(S) FAILED!\n";
+        cout << "=========================================\n";
+        return 1;
+    }
+}
