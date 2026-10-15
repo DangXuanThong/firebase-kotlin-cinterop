@@ -4,7 +4,7 @@ set -euo pipefail
 # 1. Declare constants
 SDK_VER="v14.0.0"
 WORK_DIR="./temp_sdk_dir"
-INSTALL_DIR="./firebase-cpp-sdk"
+INSTALL_DIR="./native/firebase-cpp-sdk"
 
 # Store absolute paths so directory navigation does not break relative paths
 ORIGINAL_DIR="$(pwd)"
@@ -21,6 +21,7 @@ cd "$ABS_WORK_DIR"
 echo "==> Step 3: Configuring CMake..."
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release \
+     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
      -DFIREBASE_INCLUDE_LIBRARY_DEFAULT=OFF \
      -DFIREBASE_INCLUDE_AUTH=ON \
      -DFIREBASE_INCLUDE_FIRESTORE=ON \

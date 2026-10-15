@@ -65,7 +65,8 @@ package-lock.json
 packages/firebase_ffi/.firebase-emulators.json
 
 firebase-sdk-install/
-firebase-cpp-sdk/
+**/firebase-cpp-sdk/
+temp_sdk_dir/
 **/.gradle/
 **/.kotlin/
 **/local.properties
