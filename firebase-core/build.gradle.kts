@@ -36,6 +36,28 @@ kotlin {
                 packageName("fdb")
                 includeDirs("$projectDir/../packages/firebase_ffi/native/include")
             }
+            create("native") {
+                defFile(
+                    project.file("build/native.def").apply {
+                        if (!exists()) {
+                            this.parentFile.mkdirs()
+                            createNewFile()
+                        }
+                        bufferedWriter().use {
+                            val soPath = projectDir.resolve("../native/build").canonicalPath
+                            it.write(
+                                """
+                                package = io.github.dangxuanthong.firebase.core.native
+                                headers = firebase_compat.h
+                                headerFilter = firebase_compat.h
+                                linkerOpts = -lfirebase_native -rpath $soPath -L$soPath
+                                """.trimIndent()
+                            )
+                        }
+                    }
+                )
+                includeDirs("$projectDir/../native/include")
+            }
         }
         compilerOptions {
             optIn.add(
