@@ -21,10 +21,10 @@ cd "$ABS_WORK_DIR"
 echo "==> Step 3: Configuring CMake..."
 mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release \
-     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
      -DFIREBASE_INCLUDE_LIBRARY_DEFAULT=OFF \
      -DFIREBASE_INCLUDE_AUTH=ON \
      -DFIREBASE_INCLUDE_FIRESTORE=ON \
+     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
      -DFIREBASE_LINUX_USE_CXX11_ABI=ON
 
 # 4. Build target firebase_firestore in parallel

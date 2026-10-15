@@ -1,7 +1,7 @@
 # firebase-kotlin-cinterop
 
 Kotlin Multiplatform (KMP) Firebase SDK supporting **Android** and **Linux (`linuxX64`)** via
-Kotlin/Native `cinterop` and the Firebase C++ SDK.
+Kotlin/Native `cinterop` and the official **Firebase C++ SDK**.
 
 Built specifically for **Linux (`linuxX64`)** desktop and embedded applications (where official
 Firebase Kotlin / Android SDKs lack native target support), while providing a unified KMP API
@@ -9,23 +9,24 @@ matching standard Kotlin Firebase libraries on Android.
 
 ---
 
-## 🌟 Features
+## 🌟 Key Features & Updates
 
-- **Kotlin Multiplatform (KMP)** API mirroring standard KMP Firebase libraries
-  (`dev.gitlive.firebase`).
-- **Target Platforms**:
-    - **Android**: Delegates to `dev.gitlive.firebase` (GitLive Firebase SDK for Kotlin).
-    - **Linux (`linuxX64`)**: Binds directly to the native `libfirebase_ffi.so` C-shared library
-      (built on the official Firebase C++ SDK) via Kotlin/Native `cinterop`.
-- **CBOR Binary Serialization**: Uses `kotlinx.serialization` (JSON / CBOR) for high-performance
-  payload parsing on native Linux.
-- **Coroutines & Real-Time Flows**:
-    - `suspendNativeCall`: Async coroutine suspension for single operations.
-    - `flowNativeCall`: Cold Kotlin `Flow` (`callbackFlow`) for continuous real-time Firestore
-      listeners with automatic cleanup/unlistening on cancellation.
-- **`google-services.json` Config Parser**: Built-in `parseGoogleServicesConfig` to initialize
-  Firebase directly from standard `google-services.json` configuration files without manual
-  credential wiring.
+- **Direct Integration with Official Firebase C++ SDK**: Native compatibility layer (`native/`)
+  built directly on Google's official [Firebase C++ SDK](https://github.com/firebase/firebase-cpp-sdk).
+- **C11 / C++11 Modern Linux ABI**: Compiled with `-DFIREBASE_LINUX_USE_CXX11_ABI=ON`
+  (`_GLIBCXX_USE_CXX11_ABI=1`) and `-DCMAKE_POSITION_INDEPENDENT_CODE=ON` (`-fPIC`) for seamless
+  linkage with modern Linux system libraries and Kotlin/Native `cinterop`.
+- **Automated SDK Build Script**: Built-in script `scripts/install_firebase_sdk.sh` automatically
+  fetches, configures (App Core + Auth + Firestore), compiles, and packages the required SDK static
+  archives into `native/firebase-cpp-sdk`.
+- **Unified Kotlin API**:
+  - **Android**: Uses native Kotlin/JVM Firebase SDK (`com.google.firebase` /
+    `dev.gitlive.firebase`).
+  - **Linux (`linuxX64`)**: Binds directly to `libfirebase_native.so` via Kotlin/Native `cinterop`.
+- **Coroutines & Real-Time Flows**: Cold Kotlin `Flow` (`callbackFlow`) for continuous real-time
+  Firestore listeners with automatic cleanup on cancellation.
+- **`google-services.json` Config Parser**: Direct initialization from `google-services.json`
+  config payloads.
 
 ---
 
@@ -38,26 +39,64 @@ matching standard Kotlin Firebase libraries on Android.
 
 ---
 
-## 🚧 Platform Limitations
+## 🛠 Repository Layout
 
-While the Android target delegates to the GitLive Firebase SDK, certain features and platform capabilities are currently limited:
+```
+├── firebase-core/                  # KMP Firebase Core module (Android & linuxX64)
+├── firebase-firestore/             # KMP Cloud Firestore module (Android & linuxX64)
+├── native/                         # Native C++ compatibility layer & SDK
+│   ├── firebase-cpp-sdk/           # Installed Firebase C++ SDK (lib/ and include/)
+│   ├── include/
+│   │   └── firebase_compat.h       # C-ABI header file for cinterop
+│   ├── src/
+│   │   └── firebase_impl.cpp       # C++ implementation wrapping App, Auth & Firestore
+│   ├── test/
+│   │   └── test.c                  # Pure C test executable verifying C-ABI bridge
+│   └── CMakeLists.txt              # Builds libfirebase_native.so and test executable
+└── scripts/
+    └── install_firebase_sdk.sh     # Automated script to fetch, build & package Firebase C++ SDK
+```
 
-### Core Module (`:firebase-core`)
-- **Single `FirebaseApp` Instance**: `FirebaseApp` on `linuxX64` currently supports only 1 app instance, which must be named `"[DEFAULT]"`.
-- **Native Exception Mapping**: `FirebaseException` exceptions are not mapped directly from C++ native exceptions on Linux.
-- **Ignored Configuration Properties**: `gaTrackingId` and `gcmSenderId` in `FirebaseOptions` are ignored on Linux.
+---
 
-### Firestore Module (`:firebase-firestore`)
-- **Document Operations**: `DocumentReference` currently supports only document-level operations (`get`, `set`, `delete`) using serialized Kotlin data classes (`@Serializable`). Field-level map operations (e.g. `update(map)`) are not available.
-- **Document Deserialization**: `DocumentSnapshot` only supports the full-document `data()` deserialization call (`data<T>()`). Individual field getters (e.g., `get(field)`) are not supported.
-- **Firestore Options & Parameters**:
-  - The `source` parameter in `DocumentReference.get(source)` is ignored on Linux.
-  - `SetOptions` modes other than `SetOptions.Merge` default to full document overwrite behavior on Linux.
-  - `SnapshotMetadata` properties (such as `hasPendingWrites` and `isFromCache`) are unpopulated/ignored on Linux.
-- **Minimal Firestore Feature Set**: `FirebaseFirestore` exposes a bare-minimum feature set (`collection`, `document`, and `terminate`). Advanced features like Transactions, Write Batches, Collection Groups, Persistence Clearing, and Emulator Switching are not yet implemented on Linux.
-- **Cache & Settings Limitations**:
-  - `CacheSettings` / `LocalCacheSettings` in `FirebaseFirestoreSettings` are not yet ported on Android or Linux.
-  - `MemoryGarbageCollectorSettings` and `ServerTimestampBehavior` settings are ignored on Linux.
+## 🔧 Building Native C-Interop (`linuxX64`)
+
+### 1. Build & Install Firebase C++ SDK
+
+Run the automated build script to download and compile the official Firebase C++ SDK:
+
+```bash
+./scripts/install_firebase_sdk.sh
+```
+
+This script:
+
+1. Clones tag `v14.0.0` from `firebase-cpp-sdk`.
+2. Configures CMake with:
+```
+-DCMAKE_BUILD_TYPE=Release \
+    -DFIREBASE_INCLUDE_LIBRARY_DEFAULT=OFF \
+    -DFIREBASE_INCLUDE_AUTH=ON \
+    -DFIREBASE_INCLUDE_FIRESTORE=ON \
+    -DFIREBASE_LINUX_USE_CXX11_ABI=ON \
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+```
+3. Compiles `firebase_firestore`, `firebase_auth`, `firebase_app`, `gRPC`, `BoringSSL`, `Protobuf`,
+   and `LevelDB`.
+4. Copies compiled `.a` static archives and public C++ headers into `native/firebase-cpp-sdk/`.
+
+### 2. Build Native Compat Shared Library (`libfirebase_native.so`) & Run C Test
+
+To build the C compatibility shared library and run the verification test:
+
+```bash
+# Configure & compile native library and C test binary
+cmake -S native -B native/build
+cmake --build native/build
+
+# Run verification test
+./native/build/testc
+```
 
 ---
 
@@ -156,55 +195,6 @@ suspend fun observeDocument() {
         }
 }
 ```
-
----
-
-## 🛠 Repository Layout
-
-```
-├── firebase-core/          # KMP Firebase Core module (Android & linuxX64)
-├── firebase-firestore/     # KMP Cloud Firestore module (Android & linuxX64)
-│   └── src/linuxX64Main/   # cinterop bindings (NativeCall.kt, CBOR decoding)
-├── packages/firebase_ffi/  # Native C/C++ FFI library (Firebase C++ SDK wrapper)
-└── example/
-    ├── shared/             # KMP shared example & Android device tests
-    └── linuxApp/           # Executable Linux app (linuxX64)
-```
-
----
-
-## 🔧 Building Native C-Interop (`linuxX64`)
-
-The `linuxX64` target links against `libfirebase_ffi.so` built from `packages/firebase_ffi/native`.
-
-Before building the `linuxX64` target in Gradle, ensure `libfirebase_ffi.so` exists in
-`packages/firebase_ffi/native/build/`. The Gradle task `cinteropFdbLinuxX64` automatically generates
-`fdb.def` and configures the linker flags (`-lfirebase_ffi`).
-
----
-
-## ⚠️ Known Issues
-
-- **Relative `google-services.json` File Resolution on Linux**: When using
-  `Firebase.initialize(path = "google-services.json")` or `parseGoogleServicesConfig()`, the
-  relative file path is resolved against the process's current working directory (where the terminal
-  command/executable binary is launched from). If `google-services.json` is missing in that working
-  directory, Okio will throw an `okio.FileNotFoundException`. To avoid this, either pass an absolute
-  file path or ensure the working directory contains `google-services.json`. *(Perhaps address in a
-  future update).*
-
----
-
-## 🙏 Acknowledgements & Credits
-
-This project builds upon and integrates work from the following open-source projects:
-
-- **Joel Winarske** ([@jwinarske](https://github.com/jwinarske)): Author of the original
-  [`firebase_ffi`](https://github.com/jwinarske/firebase_ffi) C/C++ FFI bridge layer
-  (`packages/firebase_ffi/native`) wrapping the Firebase C++ SDK on Embedded Linux.
-- **GitLive** ([`GitLiveApp/firebase-kotlin-sdk`](https://github.com/GitLiveApp/firebase-kotlin-sdk)):
-  Authors of the Firebase Kotlin SDK (`dev.gitlive.firebase`), which powers the Android target
-  implementation and serves as the API design model for this library.
 
 ---
 
