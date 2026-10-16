@@ -1,8 +1,10 @@
+import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlin)
     alias(libs.plugins.kotlinSerialization)
+    alias(libs.plugins.kotlinPowerAssert)
     alias(libs.plugins.androidLibrary)
     alias(libs.plugins.mavenPublish)
 }
@@ -74,15 +76,31 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation(libs.kotlinx.coroutines.test)
         }
         androidMain.dependencies {
             implementation(libs.gitlive.firebase.app)
+        }
+        named("androidDeviceTest").dependencies {
+//            implementation(libs.androidx.test.junit)
+            implementation(libs.androidx.test.runner)
         }
     }
 
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
     }
+}
+
+@OptIn(ExperimentalKotlinGradlePluginApi::class)
+powerAssert {
+    functions = listOf(
+        "kotlin.assert",
+        "kotlin.test.assertEquals",
+        "kotlin.test.assertFailsWith",
+        "kotlin.test.assertNull",
+        "kotlin.require"
+    )
 }
 
 mavenPublishing {

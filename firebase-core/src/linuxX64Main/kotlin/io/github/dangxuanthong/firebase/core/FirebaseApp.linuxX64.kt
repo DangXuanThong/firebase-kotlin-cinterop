@@ -5,8 +5,11 @@ import io.github.dangxuanthong.firebase.core.native.App_getName
 import io.github.dangxuanthong.firebase.core.native.App_getOptions
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.toKString
+import kotlinx.coroutines.runBlocking
 
-actual class FirebaseApp internal constructor(delegate: CPointer<cnames.structs.NativeApp>) {
+actual class FirebaseApp internal constructor(delegate: CPointer<cnames.structs.NativeApp>) :
+    AutoCloseable {
+
     private var delegate: CPointer<cnames.structs.NativeApp>?
 
     actual val name: String
@@ -33,13 +36,12 @@ actual class FirebaseApp internal constructor(delegate: CPointer<cnames.structs.
         delegate = null
     }
 
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is FirebaseApp) return false
-        return internalName == other.name
+    override fun close() = runBlocking {
+        delete()
     }
 
+    override fun equals(other: Any?): Boolean =
+        other is FirebaseApp && other.name == internalName
     override fun hashCode(): Int = internalName.hashCode()
-
     override fun toString() = "FirebaseApp(name=$internalName, options=$internalOptions)"
 }

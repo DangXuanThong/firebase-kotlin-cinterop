@@ -24,8 +24,6 @@ actual class FirebaseApp internal constructor(private val delegate: RealFirebase
 
     override fun equals(other: Any?): Boolean =
         other is FirebaseApp && other.delegate == delegate
-
     override fun hashCode(): Int = delegate.hashCode()
-
     override fun toString(): String = delegate.toString()
 }

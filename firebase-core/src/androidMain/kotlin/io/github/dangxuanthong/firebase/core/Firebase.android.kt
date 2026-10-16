@@ -17,6 +17,16 @@ actual fun Firebase.apps(context: Any?): List<FirebaseApp> =
 
 actual fun Firebase.initialize(
     context: Any?,
+    options: FirebaseOptions
+): FirebaseApp {
+    require(context is Context) {
+        "Android requires a real android.content.Context to initialize Firebase"
+    }
+    return FirebaseApp(RealFirebase.initialize(context, options.toRealFirebaseOptions()))
+}
+
+actual fun Firebase.initialize(
+    context: Any?,
     options: FirebaseOptions,
     name: String
 ): FirebaseApp {

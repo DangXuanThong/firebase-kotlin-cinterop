@@ -8,6 +8,7 @@ import io.github.dangxuanthong.firebase.core.native.AppOptions_getFcmSenderId
 import io.github.dangxuanthong.firebase.core.native.AppOptions_getGaTrackingId
 import io.github.dangxuanthong.firebase.core.native.AppOptions_getProjectId
 import io.github.dangxuanthong.firebase.core.native.AppOptions_getStorageBucket
+import io.github.dangxuanthong.firebase.core.utils.toKStringOrNull
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.toKString
@@ -28,8 +29,8 @@ internal fun FirebaseOptions.Companion.fromNative(native: CPointer<cnames.struct
         applicationId = AppOptions_getAppId(native)!!.toKString(),
         apiKey = AppOptions_getApiKey(native)!!.toKString(),
         projectId = AppOptions_getProjectId(native)!!.toKString(),
-        databaseUrl = AppOptions_getDatabaseUrl(native)?.toKString(),
-        gaTrackingId = AppOptions_getGaTrackingId(native)?.toKString(),
-        storageBucket = AppOptions_getStorageBucket(native)?.toKString(),
-        gcmSenderId = AppOptions_getFcmSenderId(native)?.toKString()
+        databaseUrl = AppOptions_getDatabaseUrl(native)?.toKStringOrNull(),
+        gaTrackingId = AppOptions_getGaTrackingId(native)?.toKStringOrNull(),
+        storageBucket = AppOptions_getStorageBucket(native)?.toKStringOrNull(),
+        gcmSenderId = AppOptions_getFcmSenderId(native)?.toKStringOrNull()
     )
