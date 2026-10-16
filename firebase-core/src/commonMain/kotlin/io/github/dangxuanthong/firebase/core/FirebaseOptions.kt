@@ -23,7 +23,9 @@ data class FirebaseOptions(
      * configure Google Cloud Messaging.
      */
     val gcmSenderId: String? = null
-)
+) {
+    companion object
+}
 
 /** Receiver of the lambda passed to `Firebase.initialize { ... }`. */
 class FirebaseOptionsBuilder internal constructor() {

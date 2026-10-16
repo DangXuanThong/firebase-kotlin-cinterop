@@ -6,6 +6,7 @@ using namespace std;
 int failed_count = 0;
 
 void run_app_options_tests();
+void run_app_tests();
 
 int main() {
     cout << "=========================================\n";
@@ -13,6 +14,7 @@ int main() {
     cout << "=========================================\n";
 
     run_app_options_tests();
+    run_app_tests();
 
     cout << "\n=========================================\n";
     if (failed_count == 0) {

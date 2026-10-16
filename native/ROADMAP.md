@@ -29,12 +29,12 @@ This document outlines the phased roadmap for porting Google's official **Fireba
 - ~~**`AppOptions_get_*`**~~: Not needed (Kotlin's `FirebaseOptions` data class manages options state in memory on the Kotlin side).
 
 ### 1.2 `NativeApp` (Core App Instance)
-- [ ] **`App_create(options, name)`**: Wraps `firebase::App::Create(options, name)`. If `name` is `NULL`, creates default `"[DEFAULT]"` app.
-- [ ] **`App_getDefault()`**: Wraps `firebase::App::GetInstance()`.
-- [ ] **`App_getInstance(const char* name)`**: Wraps `firebase::App::GetInstance(name)`.
-- [ ] **`App_getName(NativeApp*)`**: Returns the app name string (`app->name()`).
-- [ ] **`App_getOptions(NativeApp*)`**: Retrieves copy of options used by app.
-- [ ] **`App_destroy(NativeApp*)`**: Safely deletes and cleans up the `firebase::App` instance.
+- [x] **`App_create(options, name)`**: Wraps `firebase::App::Create(options, name)`. If `name` is `NULL`, creates default `"[DEFAULT]"` app.
+- [x] **`App_getDefault()`**: Wraps `firebase::App::GetInstance()`.
+- [x] **`App_getInstance(const char* name)`**: Wraps `firebase::App::GetInstance(name)`.
+- [x] **`App_getName(NativeApp*)`**: Returns the app name string (`app->name()`).
+- [x] **`App_getOptions(NativeApp*)`**: Retrieves copy of options used by app.
+- [x] **`App_destroy(NativeApp*)`**: Safely deletes and cleans up the `firebase::App` instance.
 
 ---
 

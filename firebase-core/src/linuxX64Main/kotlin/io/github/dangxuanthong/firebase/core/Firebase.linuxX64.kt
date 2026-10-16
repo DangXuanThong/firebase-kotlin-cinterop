@@ -1,39 +1,22 @@
 package io.github.dangxuanthong.firebase.core
 
-import fdb.fdb_app_init
-import io.github.dangxuanthong.firebase.core.exceptions.FirebaseException
+import io.github.dangxuanthong.firebase.core.native.App_create
+import io.github.dangxuanthong.firebase.core.native.App_getInstance
+import kotlinx.cinterop.cstr
 
 actual val Firebase.app: FirebaseApp
-    get() = AppRegistry.current
-        ?: error(
-            "Default FirebaseApp is not initialized." +
-                " Make sure to call Firebase.initialize() first."
+    get() = App_getInstance(null)?.let { FirebaseApp(it) }
+        ?: throw IllegalStateException(
+            "Default FirebaseApp is not initialized in this process. " +
+                "Make sure to call FirebaseApp.initializeApp(...) first."
         )
 
-actual fun Firebase.app(name: String): FirebaseApp {
-    check(name == DEFAULT_APP_NAME) {
-        "FirebaseApp with name $name doesn't exist. " +
-            "Firebase on Linux supports a single app named $DEFAULT_APP_NAME."
-    }
-    return app
-}
-
-actual fun Firebase.apps(context: Any?): List<FirebaseApp> = listOfNotNull(AppRegistry.current)
-
-actual fun Firebase.initialize(context: Any?, options: FirebaseOptions, name: String): FirebaseApp {
-    require(name == DEFAULT_APP_NAME) {
-        "Firebase on Linux supports a single app named $DEFAULT_APP_NAME"
-    }
-    AppRegistry.current?.let { return it }
-
-    val rc = fdb_app_init(
-        options.applicationId,
-        options.apiKey,
-        options.projectId,
-        options.databaseUrl,
-        options.storageBucket
+actual fun Firebase.app(name: String): FirebaseApp = App_getInstance(name)?.let { FirebaseApp(it) }
+    ?: throw IllegalStateException(
+        "FirebaseApp with name $name doesn't exist. Available: ${apps().map { it.name }}"
     )
-    if (rc != 0L) throw FirebaseException("fdb_app_init failed: $rc")
 
-    return AppRegistry.publish(FirebaseApp(name, options))
-}
+actual fun Firebase.apps(context: Any?): List<FirebaseApp> = TODO("Will be implemented in phase 4")
+
+actual fun Firebase.initialize(context: Any?, options: FirebaseOptions, name: String): FirebaseApp =
+    FirebaseApp(App_create(options = options.toNative(), name = name.cstr)!!)
