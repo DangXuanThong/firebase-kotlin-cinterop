@@ -1,49 +1,21 @@
 package io.github.dangxuanthong.firebase.core
 
-import android.content.Context
-import dev.gitlive.firebase.Firebase as RealFirebase
-import dev.gitlive.firebase.FirebaseOptions as RealFirebaseOptions
-import dev.gitlive.firebase.app
-import dev.gitlive.firebase.apps
-import dev.gitlive.firebase.initialize
+import com.google.firebase.Firebase as NativeFirebase
+import com.google.firebase.FirebaseApp as NativeFirebaseApp
+import com.google.firebase.app
+import com.google.firebase.initialize
+import io.github.dangxuanthong.firebase.core.utils.requireContext
 
 actual val Firebase.app: FirebaseApp
-    get() = FirebaseApp(RealFirebase.app)
+    get() = FirebaseApp(NativeFirebase.app)
 
-actual fun Firebase.app(name: String): FirebaseApp = FirebaseApp(RealFirebase.app(name))
+actual fun Firebase.app(name: String): FirebaseApp = FirebaseApp(NativeFirebase.app(name))
 
 actual fun Firebase.apps(context: Any?): List<FirebaseApp> =
-    RealFirebase.apps(context).map { FirebaseApp(it) }
+    NativeFirebaseApp.getApps(context.requireContext()).map { FirebaseApp(it) }
 
-actual fun Firebase.initialize(
-    context: Any?,
-    options: FirebaseOptions
-): FirebaseApp {
-    require(context is Context) {
-        "Android requires a real android.content.Context to initialize Firebase"
-    }
-    return FirebaseApp(RealFirebase.initialize(context, options.toRealFirebaseOptions()))
-}
+actual fun Firebase.initialize(context: Any?, options: FirebaseOptions): FirebaseApp =
+    FirebaseApp(NativeFirebase.initialize(context.requireContext(), options.toNative()))
 
-actual fun Firebase.initialize(
-    context: Any?,
-    options: FirebaseOptions,
-    name: String
-): FirebaseApp {
-    require(context is Context) {
-        "Android requires a real android.content.Context to initialize Firebase"
-    }
-    val app = RealFirebase.apps(context).firstOrNull { it.name == name }
-        ?: RealFirebase.initialize(context, options.toRealFirebaseOptions(), name)
-    return FirebaseApp(app)
-}
-
-private fun FirebaseOptions.toRealFirebaseOptions() = RealFirebaseOptions(
-    applicationId = applicationId,
-    apiKey = apiKey,
-    databaseUrl = databaseUrl,
-    projectId = projectId,
-    storageBucket = storageBucket,
-    gaTrackingId = gaTrackingId,
-    gcmSenderId = gcmSenderId
-)
+actual fun Firebase.initialize(context: Any?, options: FirebaseOptions, name: String): FirebaseApp =
+    FirebaseApp(NativeFirebase.initialize(context.requireContext(), options.toNative(), name))
