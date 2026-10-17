@@ -1,9 +1,5 @@
 package io.github.dangxuanthong.firebase.core
 
-import okio.FileSystem
-import okio.Path.Companion.toPath
-import okio.SYSTEM
-
 /**
  * Mirroring `dev.gitlive.firebase.Firebase`
  *
@@ -75,7 +71,7 @@ expect fun Firebase.initialize(context: Any?, options: FirebaseOptions): Firebas
  *  - Others: ignored, pass `null`.
  * @param options represents the global [FirebaseOptions]
  * @param name unique name for the app. It is an error to initialize an app with an already
- * existing name.
+ * existing name. Starting and ending whitespace characters in the name are ignored (trimmed).
  * @return an instance of [FirebaseApp]
  * @throws IllegalStateException if an app with the same name has already been initialized.
  */

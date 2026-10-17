@@ -91,5 +91,5 @@ void bind_future_callback(
 
 *Goal: Support apps running multiple simultaneous Firebase projects.*
 
-- [ ] **`fdb_app_get_all_apps()`**: Wraps `firebase::App::GetApps()` to return a list of all active app names.
+- [x] **`fdb_app_get_all_apps()`**: Wraps `firebase::App::GetApps()` to return a list of all active app names.
 - [ ] **`fdb_init_result_to_string(int init_result)`**: Converts `firebase::InitResult` enum errors (e.g. `kInitResultFailedMissingDependency`) into human-readable C strings for Kotlin exceptions.

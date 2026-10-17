@@ -1,6 +1,8 @@
 #ifndef FIREBASE_COMPAT_H
 #define FIREBASE_COMPAT_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 namespace firebase { class App; class AppOptions; }
 typedef firebase::App NativeApp;
@@ -40,6 +42,8 @@ const NativeAppOptions* App_getOptions(const NativeApp* app);
 // Methods
 const NativeApp* App_create(const NativeAppOptions* options, const char* name);
 const NativeApp* App_getInstance(const char* name);
+size_t App_getAppsCount(void);
+size_t App_getApps(NativeApp** out, size_t capacity);
 void App_destroy(NativeApp* app);
 
 #ifdef __cplusplus

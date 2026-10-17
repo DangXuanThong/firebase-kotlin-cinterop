@@ -1,3 +1,4 @@
+#include <vector>
 #include "firebase_compat.h"
 #include "firebase/app.h"
 
@@ -86,6 +87,18 @@ const NativeApp* App_create(const NativeAppOptions* options, const char* name) {
 
 const NativeApp* App_getInstance(const char* name) {
   return (!name || name[0] == '\0') ? App::GetInstance() : App::GetInstance(name);
+}
+
+size_t App_getAppsCount(void) {
+  return App::GetApps().size();
+}
+
+size_t App_getApps(NativeApp** out, size_t capacity) {
+  if (!out) return 0;
+  const auto apps = App::GetApps();
+  size_t size = apps.size() < capacity ? apps.size() : capacity;
+  for (size_t i = 0; i < size; ++i) out[i] = apps[i];
+  return size;
 }
 
 void App_destroy(NativeApp* app) {
