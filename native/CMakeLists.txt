@@ -37,5 +37,5 @@ target_link_libraries(firebase_native PRIVATE
 )
 
 # Build C++ test executable
-add_executable(test_main test/main.cpp test/test_app_options.cpp test/test_app.cpp)
+add_executable(test_main test/main.cpp)
 target_link_libraries(test_main PRIVATE firebase_native)

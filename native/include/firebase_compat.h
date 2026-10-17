@@ -2,14 +2,14 @@
 #define FIREBASE_COMPAT_H
 
 #ifdef __cplusplus
+namespace firebase { class App; class AppOptions; }
+typedef firebase::App NativeApp;
+typedef firebase::AppOptions NativeAppOptions;
 extern "C" {
+#else
+typedef struct NativeApp NativeApp;
+typedef struct NativeAppOptions NativeAppOptions;
 #endif
-
-// =============== Structs wrapping actual classes in cpp ===============
-typedef struct NativeAppOptions NativeAppOptions; // Wrapper of firebase::AppOptions
-typedef struct NativeApp NativeApp; // Wrapper of firebase::App
-
-// =============== Methods on classes ===============
 
 // AppOptions
 // Getters
@@ -30,16 +30,16 @@ NativeAppOptions* AppOptions_create(
     const char* storage_bucket,
     const char* project_id
 );
-NativeAppOptions* AppOptions_fromJson(const char* config);
+const NativeAppOptions* AppOptions_fromJson(const char* config);
 void AppOptions_destroy(NativeAppOptions* options);
 
 // App
 // Getters
 const char* App_getName(const NativeApp* app);
-NativeAppOptions* App_getOptions(const NativeApp* app);
+const NativeAppOptions* App_getOptions(const NativeApp* app);
 // Methods
-NativeApp* App_create(const NativeAppOptions* options, const char* name);
-NativeApp* App_getInstance(const char* name);
+const NativeApp* App_create(const NativeAppOptions* options, const char* name);
+const NativeApp* App_getInstance(const char* name);
 void App_destroy(NativeApp* app);
 
 #ifdef __cplusplus
