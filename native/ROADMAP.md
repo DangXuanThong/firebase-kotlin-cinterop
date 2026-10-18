@@ -43,14 +43,14 @@ This document outlines the phased roadmap for porting Google's official **Fireba
 *Goal: Allow developers to control C++ SDK log verbosity for debugging native behavior.*
 
 ### 2.1 Log Level Configuration
-- [ ] **`fdb_set_log_level(int level)`**: Wraps `firebase::SetLogLevel()`.
+- [x] **`fdb_set_log_level(int level)`**: Wraps `firebase::SetLogLevel()`.
   - `0`: Verbose
   - `1`: Debug
   - `2`: Info
   - `3`: Warning
   - `4`: Error
   - `5`: Assert
-- [ ] **`fdb_get_log_level()`**: Wraps `firebase::GetLogLevel()`.
+- [x] **`fdb_get_log_level()`**: Wraps `firebase::GetLogLevel()`.
 
 ---
 

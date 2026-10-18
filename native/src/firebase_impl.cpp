@@ -1,6 +1,7 @@
 #include <vector>
 #include "firebase_compat.h"
 #include "firebase/app.h"
+#include "firebase/log.h"
 
 using namespace firebase;
 
@@ -59,7 +60,7 @@ NativeAppOptions* AppOptions_create(
   return options;
 }
 
-const NativeAppOptions* AppOptions_fromJson(const char* config) {
+NativeAppOptions* AppOptions_fromJson(const char* config) {
   if (!config || config[0] == '\0') return nullptr;
   return AppOptions::LoadFromJsonConfig(config);
 }
@@ -79,13 +80,13 @@ const NativeAppOptions* App_getOptions(const NativeApp* app) {
 }
 
 // App methods
-const NativeApp* App_create(const NativeAppOptions* options, const char* name) {
+NativeApp* App_create(const NativeAppOptions* options, const char* name) {
   if (!options) return nullptr;
   return (!name || name[0] == '\0') ? App::Create(*options)
                                     : App::Create(*options, name);
 }
 
-const NativeApp* App_getInstance(const char* name) {
+NativeApp* App_getInstance(const char* name) {
   return (!name || name[0] == '\0') ? App::GetInstance() : App::GetInstance(name);
 }
 
@@ -103,6 +104,16 @@ size_t App_getApps(NativeApp** out, size_t capacity) {
 
 void App_destroy(NativeApp* app) {
   delete app;
+}
+
+// Logging
+void setLogLevel(int level) {
+  if (level < firebase::kLogLevelVerbose || level > firebase::kLogLevelAssert) return;
+  SetLogLevel(static_cast<LogLevel>(level));
+}
+
+int getLogLevel(void) {
+  return static_cast<int>(GetLogLevel());
 }
 
 } // extern "C"

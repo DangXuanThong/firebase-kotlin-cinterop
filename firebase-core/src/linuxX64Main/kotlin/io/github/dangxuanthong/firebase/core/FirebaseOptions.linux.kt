@@ -1,6 +1,8 @@
 package io.github.dangxuanthong.firebase.core
 
+import cnames.structs.NativeAppOptions
 import io.github.dangxuanthong.firebase.core.native.AppOptions_create
+import io.github.dangxuanthong.firebase.core.native.AppOptions_destroy
 import io.github.dangxuanthong.firebase.core.native.AppOptions_getApiKey
 import io.github.dangxuanthong.firebase.core.native.AppOptions_getAppId
 import io.github.dangxuanthong.firebase.core.native.AppOptions_getDatabaseUrl
@@ -13,7 +15,7 @@ import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.toKString
 
-internal fun FirebaseOptions.toNative(): CPointer<cnames.structs.NativeAppOptions> =
+internal fun FirebaseOptions.toNative(): CPointer<NativeAppOptions> =
     AppOptions_create(
         applicationId.cstr,
         apiKey.cstr,
@@ -24,7 +26,7 @@ internal fun FirebaseOptions.toNative(): CPointer<cnames.structs.NativeAppOption
         projectId.cstr
     )!!
 
-internal fun FirebaseOptions.Companion.fromNative(native: CPointer<cnames.structs.NativeAppOptions>) =
+internal fun FirebaseOptions.Companion.fromNative(native: CPointer<NativeAppOptions>) =
     FirebaseOptions(
         applicationId = AppOptions_getAppId(native)!!.toKString(),
         apiKey = AppOptions_getApiKey(native)!!.toKString(),
@@ -34,3 +36,15 @@ internal fun FirebaseOptions.Companion.fromNative(native: CPointer<cnames.struct
         storageBucket = AppOptions_getStorageBucket(native)?.toKStringOrNull(),
         gcmSenderId = AppOptions_getFcmSenderId(native)?.toKStringOrNull()
     )
+
+/**
+ * Executes [block] with this temporary [NativeAppOptions] and guarantees cleanup via
+ * [AppOptions_destroy]. Used for initializing apps, where the C++ SDK copies the
+ * options internally on creation.
+ */
+internal inline fun <T> CPointer<NativeAppOptions>.use(block: (CPointer<NativeAppOptions>) -> T) =
+    try {
+        block(this)
+    } finally {
+        AppOptions_destroy(this)
+    }

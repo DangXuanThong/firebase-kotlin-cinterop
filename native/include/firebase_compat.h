@@ -32,7 +32,7 @@ NativeAppOptions* AppOptions_create(
     const char* storage_bucket,
     const char* project_id
 );
-const NativeAppOptions* AppOptions_fromJson(const char* config);
+NativeAppOptions* AppOptions_fromJson(const char* config);
 void AppOptions_destroy(NativeAppOptions* options);
 
 // App
@@ -40,11 +40,24 @@ void AppOptions_destroy(NativeAppOptions* options);
 const char* App_getName(const NativeApp* app);
 const NativeAppOptions* App_getOptions(const NativeApp* app);
 // Methods
-const NativeApp* App_create(const NativeAppOptions* options, const char* name);
-const NativeApp* App_getInstance(const char* name);
+NativeApp* App_create(const NativeAppOptions* options, const char* name);
+NativeApp* App_getInstance(const char* name);
 size_t App_getAppsCount(void);
 size_t App_getApps(NativeApp** out, size_t capacity);
 void App_destroy(NativeApp* app);
+
+// Logging
+typedef enum {
+    LOG_LEVEL_VERBOSE = 0,
+    LOG_LEVEL_DEBUG = 1,
+    LOG_LEVEL_INFO = 2,
+    LOG_LEVEL_WARNING = 3,
+    LOG_LEVEL_ERROR = 4,
+    LOG_LEVEL_ASSERT = 5
+} NativeLogLevel;
+
+void setLogLevel(int level);
+int getLogLevel(void);
 
 #ifdef __cplusplus
 }
