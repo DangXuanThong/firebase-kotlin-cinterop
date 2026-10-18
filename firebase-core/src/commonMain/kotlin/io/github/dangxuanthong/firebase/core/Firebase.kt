@@ -59,7 +59,7 @@ expect fun Firebase.apps(context: Any? = null): List<FirebaseApp>
  * @param options represents the global [FirebaseOptions]
  * @return the default [FirebaseApp] if it has been initialized previously or a new one.
  */
-expect fun Firebase.initialize(context: Any?, options: FirebaseOptions): FirebaseApp
+expect fun Firebase.initialize(context: Any? = null, options: FirebaseOptions): FirebaseApp
 
 /**
  * A factory method to initialize a [FirebaseApp].
