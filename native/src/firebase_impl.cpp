@@ -78,6 +78,10 @@ const NativeAppOptions* App_getOptions(const NativeApp* app) {
   if (!app) return nullptr;
   return &app->options();
 }
+const char* App_getDefaultAppName() {
+  return firebase::kDefaultAppName;
+}
+
 
 // App methods
 NativeApp* App_create(const NativeAppOptions* options, const char* name) {

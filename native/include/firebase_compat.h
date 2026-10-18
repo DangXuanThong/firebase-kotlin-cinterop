@@ -39,6 +39,7 @@ void AppOptions_destroy(NativeAppOptions* options);
 // Getters
 const char* App_getName(const NativeApp* app);
 const NativeAppOptions* App_getOptions(const NativeApp* app);
+const char* App_getDefaultAppName();
 // Methods
 NativeApp* App_create(const NativeAppOptions* options, const char* name);
 NativeApp* App_getInstance(const char* name);
