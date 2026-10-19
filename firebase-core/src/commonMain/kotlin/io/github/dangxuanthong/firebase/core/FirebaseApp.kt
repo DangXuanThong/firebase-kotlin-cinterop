@@ -23,5 +23,5 @@ expect class FirebaseApp {
      *
      * A no-op if delete was called before.
      */
-    suspend fun delete()
+    fun delete()
 }

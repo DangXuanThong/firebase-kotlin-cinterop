@@ -10,7 +10,7 @@ actual class FirebaseApp internal constructor(private val delegate: NativeFireba
     actual val options: FirebaseOptions
         get() = FirebaseOptions.fromNative(delegate.options)
 
-    actual suspend fun delete(): Unit = delegate.delete()
+    actual fun delete(): Unit = delegate.delete()
 
     override fun equals(other: Any?): Boolean = other is FirebaseApp && other.delegate == delegate
     override fun hashCode(): Int = delegate.hashCode()

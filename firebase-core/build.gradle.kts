@@ -70,19 +70,16 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.okio)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
-            implementation(libs.kotlinx.coroutines.test)
         }
         androidMain.dependencies {
-            implementation(libs.gitlive.firebase.app)
+            implementation(libs.google.firebase.common)
         }
         named("androidDeviceTest").dependencies {
-//            implementation(libs.androidx.test.junit)
             implementation(libs.androidx.test.runner)
         }
     }

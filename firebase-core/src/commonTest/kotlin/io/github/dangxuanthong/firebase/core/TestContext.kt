@@ -1,3 +1,3 @@
 package io.github.dangxuanthong.firebase.core
 
-expect val testContext: Any?
+internal expect val testContext: Any?

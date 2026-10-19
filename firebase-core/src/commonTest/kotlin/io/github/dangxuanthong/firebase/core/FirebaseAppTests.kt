@@ -7,8 +7,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.test.runTest
 
 class FirebaseAppTests {
     private val options = FirebaseOptions(
@@ -103,7 +101,7 @@ class FirebaseAppTests {
     // ── Delete lifecycle ────────────────────────────────────────────────
 
     @Test
-    fun app_deleteAndGetProperties_throws() = runTest {
+    fun app_deleteAndGetProperties_throws() {
         val app = Firebase.initialize(testContext, options)
         app.delete()
         assertFailsWith<IllegalStateException> { app.name }
@@ -111,14 +109,14 @@ class FirebaseAppTests {
     }
 
     @Test
-    fun app_deleteTwice_doesNotThrow() = runTest {
+    fun app_deleteTwice_doesNotThrow() {
         val app = Firebase.initialize(testContext, options)
         app.delete()
         app.delete()
     }
 
     @Test
-    fun apps_addAndDelete_returnsOnlyActive() = runTest {
+    fun apps_addAndDelete_returnsOnlyActive() {
         assertTrue(Firebase.apps(testContext).isEmpty())
         val app = Firebase.initialize(testContext, options)
         assertEquals(listOf(app), Firebase.apps(testContext))
@@ -127,14 +125,14 @@ class FirebaseAppTests {
     }
 
     @Test
-    fun defaultApp_deleteAndGet_throws() = runTest {
+    fun defaultApp_deleteAndGet_throws() {
         val app = Firebase.initialize(testContext, options)
         app.delete()
         assertFailsWith<IllegalStateException> { Firebase.app }
     }
 
     @Test
-    fun defaultApp_deleteAndReinitialize_succeeds() = runTest {
+    fun defaultApp_deleteAndReinitialize_succeeds() {
         val app1 = Firebase.initialize(testContext, options)
         app1.delete()
         val app2 = Firebase.initialize(testContext, options)
@@ -142,7 +140,7 @@ class FirebaseAppTests {
     }
 
     @Test
-    fun namedApp_deleteAndReinitialize_succeeds() = runTest {
+    fun namedApp_deleteAndReinitialize_succeeds() {
         val app1 = Firebase.initialize(testContext, options, "reusable")
         app1.delete()
         val app2 = Firebase.initialize(testContext, options, "reusable")
@@ -242,7 +240,7 @@ class FirebaseAppTests {
     }
 
     @Test
-    fun namedApp_deleteOne_otherUnaffected() = runTest {
+    fun namedApp_deleteOne_otherUnaffected() {
         val app1 = Firebase.initialize(testContext, options, "keep")
         val app2 = Firebase.initialize(testContext, options, "remove")
         app2.delete()
@@ -277,7 +275,7 @@ class FirebaseAppTests {
     // ── tearDown ────────────────────────────────────────────────────────
 
     @AfterTest
-    fun tearDown() = runBlocking {
+    fun tearDown() {
         Firebase.apps(testContext).forEach { it.delete() }
     }
 }

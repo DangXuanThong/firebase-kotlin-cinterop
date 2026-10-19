@@ -13,7 +13,6 @@ import kotlin.concurrent.atomics.updateAndFetch
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.toKString
-import kotlinx.coroutines.runBlocking
 
 @OptIn(ExperimentalAtomicApi::class)
 actual class FirebaseApp private constructor(private var delegate: CPointer<NativeApp>?) :
@@ -32,7 +31,7 @@ actual class FirebaseApp private constructor(private var delegate: CPointer<Nati
     private val internalName: String = name
     private val internalOptions: FirebaseOptions = options
 
-    actual suspend fun delete() {
+    actual fun delete() {
         INSTANCES.fetchAndUpdate {
             App_destroy(delegate)
             delegate = null
@@ -40,7 +39,7 @@ actual class FirebaseApp private constructor(private var delegate: CPointer<Nati
         }
     }
 
-    override fun close() = runBlocking {
+    override fun close() {
         delete()
     }
 
@@ -76,13 +75,15 @@ actual class FirebaseApp private constructor(private var delegate: CPointer<Nati
                 "FirebaseApp name $name already exists!"
             }
 
-            return INSTANCES.updateAndFetch {
-                val nativeApp = App_create(options.toNative(), normalizedName.cstr)
-                    ?: throw IllegalStateException(
-                        "Failed to initialize native FirebaseApp instance."
-                    )
-                val app = FirebaseApp(nativeApp)
-                it + (name to app)
+            return options.toNative().use { options ->
+                INSTANCES.updateAndFetch {
+                    val nativeApp = App_create(options, normalizedName.cstr)
+                        ?: throw IllegalStateException(
+                            "Failed to initialize native FirebaseApp instance."
+                        )
+                    val app = FirebaseApp(nativeApp)
+                    it + (name to app)
+                }
             }[name]!!
         }
 
