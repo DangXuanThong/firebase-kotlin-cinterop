@@ -93,9 +93,6 @@ To build the C compatibility shared library and run the verification test:
 # Configure & compile native library and C test binary
 cmake -S native -B native/build
 cmake --build native/build
-
-# Run verification test
-./native/build/testc
 ```
 
 ---

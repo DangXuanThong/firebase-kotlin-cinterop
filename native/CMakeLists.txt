@@ -19,6 +19,11 @@ find_package(OpenSSL REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBSECRET REQUIRED IMPORTED_TARGET libsecret-1)
 
+include(FetchContent)
+
+FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz)
+FetchContent_MakeAvailable(json)
+
 # Build shared library libfirebase_native.so
 add_library(firebase_native SHARED
     src/firebase_impl.cpp
@@ -34,8 +39,18 @@ target_link_libraries(firebase_native PRIVATE
     PkgConfig::LIBSECRET
     pthread
     dl
+    nlohmann_json::nlohmann_json
 )
 
 # Build C++ test executable
 add_executable(test_main test/main.cpp)
-target_link_libraries(test_main PRIVATE firebase_native)
+target_link_libraries(test_main PRIVATE
+    firebase_native
+    ${FIREBASE_LIBS}
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    PkgConfig::LIBSECRET
+    dl
+    nlohmann_json::nlohmann_json
+    pthread
+)

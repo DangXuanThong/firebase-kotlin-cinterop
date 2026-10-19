@@ -58,30 +58,37 @@ This document outlines the phased roadmap for porting Google's official **Fireba
 
 *Goal: Build the core C callback mechanism that turns `firebase::Future<T>` into Kotlin `suspend` coroutines.*
 
-Every async operation in Firebase C++ (Auth, Firestore, Storage) returns a `firebase::Future<T>`. Before writing Auth or Firestore bindings, build this generic callback helper in `firebase_impl.cpp`:
+Every async operation in Firebase C++ (Auth, Firestore, Storage) returns a `firebase::Future<T>`. Before writing Auth or Firestore bindings, build this generic callback helper in `future_bridge.hpp`:
 
-### 3.1 C Callback Signature (`firebase_compat.h`)
+- [x] **3.1 C Callback Signatures (`firebase_compat.h`)**
 ```c
-typedef void (*FdbFutureCallback)(
+typedef void (*FutureSuccessCallback)(
+    void* user_data, 
+    const uint8_t* payload, 
+    size_t payload_len
+);
+
+typedef void (*FutureFailureCallback)(
     void* user_data, 
     int error_code, 
     const char* error_message
 );
 ```
 
-### 3.2 C++ Future Helper (`firebase_impl.cpp`)
+- [x] **3.2 C++ Future Helper (`future_bridge.hpp`)**
 ```cpp
-template <typename T>
-void bind_future_callback(
-    const firebase::Future<T>& future, 
-    FdbFutureCallback callback, 
-    void* user_data
-) {
-    future.OnCompletion([callback, user_data](const firebase::Future<T>& completed_future) {
-        int error_code = completed_future.error();
-        const char* error_msg = completed_future.error_message() ? completed_future.error_message() : "";
-        callback(user_data, error_code, error_msg);
-    });
+namespace future_bridge {
+    inline std::vector<uint8_t> to_cbor(const nlohmann::json& j);
+
+    // Overloads for Future<void>, custom serializer, and default ADL to_json:
+    template <typename T, typename Serializer>
+    void Future_bindCallback(
+        const firebase::Future<T>& future, 
+        FutureSuccessCallback on_success, 
+        FutureFailureCallback on_failure, 
+        void* user_data, 
+        Serializer serializer
+    );
 }
 ```
 

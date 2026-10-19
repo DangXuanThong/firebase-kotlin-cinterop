@@ -29,7 +29,7 @@ cmake .. -DCMAKE_BUILD_TYPE=Release \
 
 # 4. Build target firebase_firestore in parallel
 echo "==> Step 4: Compiling Firebase targets..."
-cmake --build . --target firebase_firestore --parallel "$(nproc)"
+cmake --build . --target firebase_firestore --parallel "$(nproc)" -- -Wno-author
 
 # 5. Return to SDK work directory and create install directory structure
 echo "==> Step 5: Preparing install directory at $INSTALL_DIR..."

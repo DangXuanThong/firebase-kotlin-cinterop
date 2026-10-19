@@ -2,6 +2,7 @@
 #define FIREBASE_COMPAT_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 namespace firebase { class App; class AppOptions; }
@@ -56,9 +57,20 @@ typedef enum {
     LOG_LEVEL_ERROR = 4,
     LOG_LEVEL_ASSERT = 5
 } NativeLogLevel;
-
 void setLogLevel(int level);
 int getLogLevel(void);
+
+// Async Callbacks
+typedef void (*FutureSuccessCallback)(
+  void* user_data,
+  const uint8_t* payload,
+  size_t payload_len
+);
+typedef void (*FutureFailureCallback)(
+  void* user_data,
+  int error_code,
+  const char* error_message
+);
 
 #ifdef __cplusplus
 }
