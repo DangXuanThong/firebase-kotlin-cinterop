@@ -62,8 +62,9 @@ kotlin {
             }
         }
         compilerOptions {
-            optIn.add(
-                "kotlinx.cinterop.ExperimentalForeignApi" // Required for using cinterop features
+            optIn.addAll(
+                "kotlinx.cinterop.ExperimentalForeignApi", // Required for using cinterop features
+                "io.github.dangxuanthong.firebase.core.annotations.InternalFirebaseApi"
             )
         }
     }
@@ -81,6 +82,9 @@ kotlin {
         }
         named("androidDeviceTest").dependencies {
             implementation(libs.androidx.test.runner)
+        }
+        linuxX64Main.dependencies {
+            implementation(libs.kotlinx.atomicfu)
         }
     }
 

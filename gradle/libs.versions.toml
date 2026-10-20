@@ -5,6 +5,7 @@ maven-publish = "0.37.0"
 
 kotlinx-coroutines = "1.11.0"
 kotlinx-serialization = "1.11.0"
+kotlinx-atomicfu = "0.33.0"
 okio = "3.18.2"
 
 google-firebase = "23.0.0"
@@ -20,6 +21,7 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
 # native
 kotlinx-serialization-cbor = { module = "org.jetbrains.kotlinx:kotlinx-serialization-cbor", version.ref = "kotlinx-serialization" }
+kotlinx-atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "kotlinx-atomicfu" }
 # android
 google-firebase-common = { module = "com.google.firebase:firebase-common", version.ref = "google-firebase" }
 gitlive-firebase-firestore = { module = "dev.gitlive:firebase-firestore", version.ref = "gitlive-firebase" }

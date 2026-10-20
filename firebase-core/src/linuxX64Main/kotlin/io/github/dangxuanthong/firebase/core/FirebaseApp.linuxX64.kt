@@ -1,22 +1,27 @@
 package io.github.dangxuanthong.firebase.core
 
 import cnames.structs.NativeApp
+import io.github.dangxuanthong.firebase.core.annotations.InternalFirebaseApi
 import io.github.dangxuanthong.firebase.core.native.App_create
 import io.github.dangxuanthong.firebase.core.native.App_destroy
 import io.github.dangxuanthong.firebase.core.native.App_getDefaultAppName
 import io.github.dangxuanthong.firebase.core.native.App_getName
 import io.github.dangxuanthong.firebase.core.native.App_getOptions
-import kotlin.concurrent.atomics.AtomicReference
-import kotlin.concurrent.atomics.ExperimentalAtomicApi
-import kotlin.concurrent.atomics.fetchAndUpdate
-import kotlin.concurrent.atomics.updateAndFetch
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.toKString
 
-@OptIn(ExperimentalAtomicApi::class)
-actual class FirebaseApp private constructor(private var delegate: CPointer<NativeApp>?) :
-    AutoCloseable {
+actual class FirebaseApp private constructor(delegate: CPointer<NativeApp>) : AutoCloseable {
+
+    @InternalFirebaseApi
+    var delegate: CPointer<NativeApp>?
+        private set
+
+    init {
+        this.delegate = delegate
+    }
 
     actual val name: String
         get() = App_getName(delegate)?.toKString()
@@ -31,12 +36,10 @@ actual class FirebaseApp private constructor(private var delegate: CPointer<Nati
     private val internalName: String = name
     private val internalOptions: FirebaseOptions = options
 
-    actual fun delete() {
-        INSTANCES.fetchAndUpdate {
-            App_destroy(delegate)
-            delegate = null
-            it - internalName
-        }
+    actual fun delete() = synchronized(lock) {
+        App_destroy(delegate)
+        instances.remove(internalName)
+        delegate = null
     }
 
     override fun close() {
@@ -51,43 +54,43 @@ actual class FirebaseApp private constructor(private var delegate: CPointer<Nati
         val DEFAULT_APP_NAME: String
             get() = App_getDefaultAppName()!!.toKString()
 
-        private val INSTANCES = AtomicReference(mapOf<String, FirebaseApp>())
+        private val instances = mutableMapOf<String, FirebaseApp>()
+        private val lock = SynchronizedObject()
 
-        fun getInstance(name: String = DEFAULT_APP_NAME): FirebaseApp = INSTANCES.load().let {
+        fun getInstance(name: String = DEFAULT_APP_NAME): FirebaseApp = synchronized(lock) {
             val normalizedName = name.trim()
-            if (it.containsKey(normalizedName)) return@let it[normalizedName]!!
+            if (instances.containsKey(normalizedName)) return instances[normalizedName]!!
 
             if (normalizedName == DEFAULT_APP_NAME) throw IllegalStateException(
                 "Default FirebaseApp is not initialized " +
                     "in this process. Make sure to call Firebase.initialize() first."
             )
 
-            val availableAppNamesMessage = it.keys.takeIf { it.isNotEmpty() }
+            val availableAppNamesMessage = instances.keys.takeIf { it.isNotEmpty() }
                 ?.let { " Available app names: " + it.joinToString() } ?: ""
             throw IllegalStateException(
                 "FirebaseApp with name $normalizedName doesn't exist.$availableAppNamesMessage"
             )
         }
 
-        fun initializeApp(options: FirebaseOptions, name: String = DEFAULT_APP_NAME): FirebaseApp {
-            val normalizedName = name.trim()
-            check(!INSTANCES.load().containsKey(normalizedName)) {
-                "FirebaseApp name $name already exists!"
-            }
+        fun initializeApp(options: FirebaseOptions, name: String = DEFAULT_APP_NAME): FirebaseApp =
+            synchronized(lock) {
+                val normalizedName = name.trim()
+                check(!instances.containsKey(normalizedName)) {
+                    "FirebaseApp name $name already exists!"
+                }
 
-            return options.toNative().use { options ->
-                INSTANCES.updateAndFetch {
+                options.toNative().use { options ->
                     val nativeApp = App_create(options, normalizedName.cstr)
                         ?: throw IllegalStateException(
                             "Failed to initialize native FirebaseApp instance."
                         )
-                    val app = FirebaseApp(nativeApp)
-                    it + (name to app)
+                    instances[name] = FirebaseApp(nativeApp)
                 }
-            }[name]!!
-        }
+                instances[name]!!
+            }
 
         val apps: List<FirebaseApp>
-            get() = INSTANCES.load().values.toList()
+            get() = synchronized(lock) { instances.values.toList() }
     }
 }
