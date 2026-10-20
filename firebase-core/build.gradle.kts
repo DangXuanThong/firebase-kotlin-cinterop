@@ -50,8 +50,8 @@ kotlin {
                             it.write(
                                 """
                                 package = io.github.dangxuanthong.firebase.core.native
-                                headers = firebase_compat.h
-                                headerFilter = firebase_compat.h
+                                headers = firebase_compat.h firestore_compat.h
+                                headerFilter = firebase_compat.h firestore_compat.h
                                 linkerOpts = -lfirebase_native -rpath $soPath -L$soPath
                                 """.trimIndent()
                             )
