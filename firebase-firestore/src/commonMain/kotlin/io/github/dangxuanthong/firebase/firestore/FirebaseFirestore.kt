@@ -3,10 +3,10 @@ package io.github.dangxuanthong.firebase.firestore
 expect class FirebaseFirestore {
     var settings: FirebaseFirestoreSettings
 
-    fun collection(collectionPath: String): CollectionReference
+//    fun collection(collectionPath: String): CollectionReference
 
 //    fun collectionGroup(collectionId: String): Query = Query(wrapper.collectionGroup(collectionId))
-    fun document(documentPath: String): DocumentReference
+//    fun document(documentPath: String): DocumentReference
 
 //    fun batch(): WriteBatch
 //    fun setLoggingEnabled(loggingEnabled: Boolean) {}
@@ -15,6 +15,6 @@ expect class FirebaseFirestore {
 //    fun useEmulator(host: String, port: Int)
 //    suspend fun disableNetwork()
 //    suspend fun enableNetwork()
-    suspend fun terminate()
+//    suspend fun terminate()
 //    suspend fun waitForPendingWrites()
 }

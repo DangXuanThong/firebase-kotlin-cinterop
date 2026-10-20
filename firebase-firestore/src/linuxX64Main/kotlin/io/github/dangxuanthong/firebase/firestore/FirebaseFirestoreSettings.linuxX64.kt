@@ -2,6 +2,7 @@ package io.github.dangxuanthong.firebase.firestore
 
 import cnames.structs.NativeSettings
 import io.github.dangxuanthong.firebase.core.native.Settings_create
+import io.github.dangxuanthong.firebase.core.native.Settings_destroy
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.cstr
 
@@ -13,3 +14,10 @@ fun FirebaseFirestoreSettings.toNative(): CPointer<NativeSettings> =
         cache_size_bytes = if (cacheSettings is LocalCacheSettings.Persistent)
             cacheSettings.sizeBytes else 1
     )!!
+
+fun <T> CPointer<NativeSettings>.use(block: (CPointer<NativeSettings>) -> T): T =
+    try {
+        block(this)
+    } finally {
+        Settings_destroy(this)
+    }

@@ -16,12 +16,8 @@ import kotlinx.cinterop.toKString
 actual class FirebaseApp private constructor(delegate: CPointer<NativeApp>) : AutoCloseable {
 
     @InternalFirebaseApi
-    var delegate: CPointer<NativeApp>?
+    var delegate: CPointer<NativeApp>? = delegate
         private set
-
-    init {
-        this.delegate = delegate
-    }
 
     actual val name: String
         get() = App_getName(delegate)?.toKString()

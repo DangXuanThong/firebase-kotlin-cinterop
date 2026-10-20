@@ -33,7 +33,8 @@ kotlin {
         compilerOptions {
             optIn.addAll(
                 "kotlinx.cinterop.ExperimentalForeignApi",
-                "kotlinx.serialization.ExperimentalSerializationApi"
+                "kotlinx.serialization.ExperimentalSerializationApi",
+                "io.github.dangxuanthong.firebase.core.annotations.InternalFirebaseApi"
             )
         }
     }
@@ -49,6 +50,7 @@ kotlin {
         }
         linuxX64Main.dependencies {
             implementation(libs.kotlinx.serialization.cbor)
+            implementation(libs.kotlinx.atomicfu)
         }
         }
     }

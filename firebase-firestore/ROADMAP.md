@@ -251,7 +251,7 @@ suspend fun <T : Any> suspendFutureCall(
 - [ ] **`DocumentSnapshot.linuxX64.kt`:**
   - `exists`: Check if data payload is non-null.
   - `data<T>()`: Decode CBOR byte array into `T` via `Cbor.decodeFromByteArray`.
-- [ ] **`FirebaseFirestoreSettings.linuxX64.kt`:**
+- [x] **`FirebaseFirestoreSettings.linuxX64.kt`:**
   - Apply host, SSL, and cache size to native settings via `Firestore_setSettings`.
 
 ---

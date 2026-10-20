@@ -45,6 +45,7 @@ typedef SnapshotSuccessCallback DocSnapshotSuccessCallback;
 typedef SnapshotFailureCallback DocSnapshotFailureCallback;
 
 // --- Firestore ---
+const char* getDefaultDatabaseNames();
 NativeFirestore* Firestore_getInstance(NativeApp* app, const char* database);
 NativeColRef* Firestore_collection(NativeFirestore* firestore, const char* collection_path);
 NativeDocRef* Firestore_document(NativeFirestore* firestore, const char* document_path);
