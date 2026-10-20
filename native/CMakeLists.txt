@@ -27,6 +27,7 @@ FetchContent_MakeAvailable(json)
 # Build shared library libfirebase_native.so
 add_library(firebase_native SHARED
     src/firebase_impl.cpp
+    src/firestore_impl.cpp
 )
 
 target_link_libraries(firebase_native PRIVATE

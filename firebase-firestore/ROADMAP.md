@@ -81,11 +81,14 @@ typedef struct NativeColRef NativeColRef;
 typedef struct NativeListenerRegistration NativeListenerRegistration;
 #endif
 
-// Listener Callback (for real-time snapshots)
-typedef void (*DocSnapshotCallback)(
+// Snapshot Listener Callbacks (for real-time snapshots)
+typedef void (*SnapshotSuccessCallback)(
     void* user_data,
     const uint8_t* payload,
-    size_t payload_len,
+    size_t payload_len
+);
+typedef void (*SnapshotFailureCallback)(
+    void* user_data,
     int error_code,
     const char* error_message
 );
@@ -148,7 +151,8 @@ void DocRef_delete(
 NativeListenerRegistration* DocRef_addSnapshotListener(
     NativeDocRef* doc_ref,
     void* user_data,
-    DocSnapshotCallback callback
+    SnapshotSuccessCallback on_snapshot,
+    SnapshotFailureCallback on_error
 );
 
 void ListenerRegistration_remove(NativeListenerRegistration* registration);
