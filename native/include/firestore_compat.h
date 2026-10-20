@@ -68,6 +68,7 @@ NativeSettings* Settings_create(
 void Settings_destroy(NativeSettings* settings);
 
 // --- CollectionReference ---
+const char* ColRef_getPath(const NativeColRef* col_ref);
 void ColRef_destroy(NativeColRef* col_ref);
 
 // --- DocumentReference ---

@@ -12,6 +12,10 @@ using namespace firebase::firestore;
 extern "C" {
 
 // --- Firestore Instance ---
+const char* getDefaultDatabaseName() {
+  return firebase::firestore::kDefaultDatabase;
+}
+
 NativeFirestore* Firestore_getInstance(NativeApp* app, const char* database) {
   if (!database || database[0] == '\0')
     return app ? Firestore::GetInstance(app) : Firestore::GetInstance();
@@ -71,6 +75,13 @@ void Settings_destroy(NativeSettings* settings) {
 }
 
 // --- Collection Reference ---
+const char* ColRef_getPath(const NativeColRef* col_ref) {
+  if (!col_ref) return nullptr;
+  thread_local std::string tls_col_path;
+  tls_col_path = col_ref->path();
+  return tls_col_path.c_str();
+}
+
 void ColRef_destroy(NativeColRef* col_ref) {
   delete col_ref;
 }
