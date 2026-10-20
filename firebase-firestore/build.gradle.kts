@@ -44,11 +44,12 @@ kotlin {
             implementation(libs.kotlinx.serialization.core)
             implementation(libs.kotlinx.coroutines.core)
         }
+        androidMain.dependencies {
+            implementation(libs.gitlive.firebase.firestore)
+        }
         linuxX64Main.dependencies {
             implementation(libs.kotlinx.serialization.cbor)
         }
-        androidMain.dependencies {
-            implementation(libs.gitlive.firebase.firestore)
         }
     }
 

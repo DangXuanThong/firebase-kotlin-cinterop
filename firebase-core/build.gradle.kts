@@ -74,17 +74,17 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.okio)
         }
-        commonTest.dependencies {
-            implementation(libs.kotlin.test)
-        }
         androidMain.dependencies {
             implementation(libs.google.firebase.common)
         }
-        named("androidDeviceTest").dependencies {
-            implementation(libs.androidx.test.runner)
-        }
         linuxX64Main.dependencies {
             implementation(libs.kotlinx.atomicfu)
+        }
+        commonTest.dependencies {
+            implementation(libs.kotlin.test)
+        }
+        named("androidDeviceTest").dependencies {
+            implementation(libs.androidx.test.runner)
         }
     }
 

@@ -3,7 +3,7 @@ package io.github.dangxuanthong.firebase.core
 import com.google.firebase.FirebaseOptions as NativeFirebaseOptions
 
 internal fun FirebaseOptions.toNative(): NativeFirebaseOptions =
-    NativeFirebaseOptions.Builder().run {
+    NativeFirebaseOptions.Builder().apply {
         setApplicationId(applicationId)
         setApiKey(apiKey)
         setProjectId(projectId)
@@ -11,8 +11,7 @@ internal fun FirebaseOptions.toNative(): NativeFirebaseOptions =
         setGaTrackingId(gaTrackingId)
         setStorageBucket(storageBucket)
         setGcmSenderId(gcmSenderId)
-        build()
-    }
+    }.build()
 
 internal fun FirebaseOptions.Companion.fromNative(native: NativeFirebaseOptions) =
     with(native) {
