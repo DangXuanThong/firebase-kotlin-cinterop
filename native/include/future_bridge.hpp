@@ -20,18 +20,16 @@ inline std::vector<uint8_t> to_cbor(const nlohmann::json& j) {
 ///@param on_failure Callback invoked when future fails with SDK error code and message.
 ///@param user_data Opaque pointer passed through to the completion handler.
 inline void Future_bindCallback(
-  const firebase::Future<void>& future,
-  FutureSuccessCallback on_success,
-  FutureFailureCallback on_failure,
-  void* user_data
+    const firebase::Future<void>& future,
+    FutureSuccessCallback on_success,
+    FutureFailureCallback on_failure,
+    void* user_data
 ) {
   future.OnCompletion([on_success, on_failure, user_data](const firebase::Future<void>& completed) {
     int error_code = completed.error();
-    if (error_code == 0) {
-      if (on_success) on_success(user_data, nullptr, 0);
-    } else {
-      if (on_failure) on_failure(user_data, error_code, completed.error_message());
-    }
+    if (error_code == 0 && on_success) on_success(user_data, nullptr, 0);
+    else if (error_code != 0 && on_failure)
+      on_failure(user_data, error_code, completed.error_message());
   });
 }
 
@@ -46,11 +44,11 @@ inline void Future_bindCallback(
 /// @param serializer Custom serializer mapping T to nlohmann::json.
 template<typename T, typename Serializer>
 inline void Future_bindCallback(
-  const firebase::Future <T>& future,
-  FutureSuccessCallback on_success,
-  FutureFailureCallback on_failure,
-  void* user_data,
-  Serializer serializer
+    const firebase::Future<T>& future,
+    FutureSuccessCallback on_success,
+    FutureFailureCallback on_failure,
+    void* user_data,
+    Serializer serializer
 ) {
   future.OnCompletion([on_success, on_failure, user_data, serializer](const firebase::Future <T>& completed) {
     int error_code = completed.error();
@@ -86,17 +84,17 @@ inline void Future_bindCallback(
 /// @param user_data Opaque pointer passed through to the completion handler.
 template<typename T>
 inline void Future_bindCallback(
-  const firebase::Future <T>& future,
-  FutureSuccessCallback on_success,
-  FutureFailureCallback on_failure,
-  void* user_data
+    const firebase::Future<T>& future,
+    FutureSuccessCallback on_success,
+    FutureFailureCallback on_failure,
+    void* user_data
 ) {
   Future_bindCallback(
-    future,
-    on_success,
-    on_failure,
-    user_data,
-    [](nlohmann::json& j, const T& val) {j = val;}
+      future,
+      on_success,
+      on_failure,
+      user_data,
+      [](nlohmann::json& j, const T& val) {j = val;}
   );
 }
 

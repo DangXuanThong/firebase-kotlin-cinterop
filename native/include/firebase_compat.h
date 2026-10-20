@@ -50,17 +50,17 @@ void App_destroy(NativeApp* app);
 
 // Logging
 typedef enum {
-    LOG_LEVEL_VERBOSE = 0,
-    LOG_LEVEL_DEBUG = 1,
-    LOG_LEVEL_INFO = 2,
-    LOG_LEVEL_WARNING = 3,
-    LOG_LEVEL_ERROR = 4,
-    LOG_LEVEL_ASSERT = 5
+  LOG_LEVEL_VERBOSE = 0,
+  LOG_LEVEL_DEBUG = 1,
+  LOG_LEVEL_INFO = 2,
+  LOG_LEVEL_WARNING = 3,
+  LOG_LEVEL_ERROR = 4,
+  LOG_LEVEL_ASSERT = 5
 } NativeLogLevel;
 void setLogLevel(int level);
 int getLogLevel(void);
 
-// Async Callbacks
+// Async Future Callbacks
 typedef void (*FutureSuccessCallback)(
   void* user_data,
   const uint8_t* payload,
