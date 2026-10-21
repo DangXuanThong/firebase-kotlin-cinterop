@@ -22,8 +22,7 @@ actual class FirebaseFirestore internal constructor(
     private var delegate: CPointer<NativeFirestore>? = delegate
 
     actual var settings: FirebaseFirestoreSettings = FirebaseFirestoreSettings()
-        @Deprecated("Property can only be written.", level = DeprecationLevel.ERROR)
-        get() = throw NotImplementedError()
+        get() = Firestore_getSettings(delegate)!!.use { FirebaseFirestoreSettings.fromNative(it) }
         set(value) {
             value.toNative().use { Firestore_setSettings(delegate, it) }
             field = value

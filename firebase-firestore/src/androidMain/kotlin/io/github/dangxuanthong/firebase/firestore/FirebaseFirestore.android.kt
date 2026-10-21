@@ -3,9 +3,9 @@ package io.github.dangxuanthong.firebase.firestore
 import com.google.firebase.firestore.FirebaseFirestore as NativeFirebaseFirestore
 
 actual class FirebaseFirestore internal constructor(private val delegate: NativeFirebaseFirestore) {
+
     actual var settings: FirebaseFirestoreSettings
-        @Deprecated("Property can only be written.", level = DeprecationLevel.ERROR)
-        get() = throw NotImplementedError()
+        get() = FirebaseFirestoreSettings.fromNative(delegate.firestoreSettings)
         set(value) {
             delegate.firestoreSettings = value.toNative()
         }
