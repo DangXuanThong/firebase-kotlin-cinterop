@@ -12,7 +12,7 @@ using namespace firebase::firestore;
 extern "C" {
 
 // --- Firestore Instance ---
-const char* getDefaultDatabaseName() {
+const char* Firestore_getDefaultDatabase() {
   return firebase::firestore::kDefaultDatabase;
 }
 
@@ -22,17 +22,22 @@ NativeFirestore* Firestore_getInstance(NativeApp* app, const char* database) {
   return app ? Firestore::GetInstance(app, database) : Firestore::GetInstance(database);
 }
 
-NativeColRef* Firestore_collection(NativeFirestore* firestore, const char* collection_path) {
+NativeSettings* Firestore_getSettings(const NativeFirestore* firestore) {
+  if (!firestore) return nullptr;
+  return new Settings(firestore->settings());
+}
+
+NativeColRef* Firestore_collection(const NativeFirestore* firestore, const char* collection_path) {
   if (!firestore || !collection_path) return nullptr;
   return new CollectionReference(firestore->Collection(collection_path));
 }
 
-NativeDocRef* Firestore_document(NativeFirestore* firestore, const char* document_path) {
+NativeDocRef* Firestore_document(const NativeFirestore* firestore, const char* document_path) {
   if (!firestore || !document_path) return nullptr;
   return new DocumentReference(firestore->Document(document_path));
 }
 
-void Firestore_setSettings(NativeFirestore* firestore, NativeSettings* settings) {
+void Firestore_setSettings(NativeFirestore* firestore, const NativeSettings* settings) {
   if (!firestore || !settings) return;
   firestore->set_settings(*settings);
 }
@@ -56,6 +61,22 @@ void Firestore_destroy(NativeFirestore* firestore) {
 }
 
 // --- Firestore Settings ---
+const char* Settings_getHost(const NativeSettings* settings) {
+  if (!settings) return nullptr;
+  thread_local std::string tls_host;
+  tls_host = settings->host();
+  return tls_host.c_str();
+}
+bool Settings_isSslEnabled(const NativeSettings* settings) {
+  return settings && settings->is_ssl_enabled();
+}
+bool Settings_isPersistenceEnabled(const NativeSettings* settings) {
+  return settings && settings->is_persistence_enabled();
+}
+int64_t Settings_getCacheSizeBytes(const NativeSettings* settings) {
+  return settings ? settings->cache_size_bytes() : -1;
+}
+
 NativeSettings* Settings_create(
     const char* host,
     bool ssl_enabled,

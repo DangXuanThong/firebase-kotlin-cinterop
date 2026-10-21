@@ -5,9 +5,10 @@ import io.github.dangxuanthong.firebase.core.Firebase
 import io.github.dangxuanthong.firebase.core.FirebaseApp
 import io.github.dangxuanthong.firebase.core.app
 import io.github.dangxuanthong.firebase.core.native.Firestore_destroy
+import io.github.dangxuanthong.firebase.core.native.Firestore_getDefaultDatabase
 import io.github.dangxuanthong.firebase.core.native.Firestore_getInstance
+import io.github.dangxuanthong.firebase.core.native.Firestore_getSettings
 import io.github.dangxuanthong.firebase.core.native.Firestore_setSettings
-import io.github.dangxuanthong.firebase.core.native.getDefaultDatabaseNames
 import kotlinx.atomicfu.locks.reentrantLock
 import kotlinx.atomicfu.locks.withLock
 import kotlinx.cinterop.CPointer
@@ -47,7 +48,7 @@ actual class FirebaseFirestore internal constructor(
 
         fun getInstance(
             app: FirebaseApp = Firebase.app,
-            database: String = getDefaultDatabaseNames()!!.toKString()
+            database: String = Firestore_getDefaultDatabase()!!.toKString()
         ): FirebaseFirestore = lock.withLock {
             checkNotNull(app.delegate) { "FirebaseApp was deleted" }
             val key = FirestoreKey(app, database)

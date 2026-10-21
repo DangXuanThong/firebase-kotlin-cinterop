@@ -45,11 +45,12 @@ typedef SnapshotSuccessCallback DocSnapshotSuccessCallback;
 typedef SnapshotFailureCallback DocSnapshotFailureCallback;
 
 // --- Firestore ---
-const char* getDefaultDatabaseNames();
+const char* Firestore_getDefaultDatabase();
 NativeFirestore* Firestore_getInstance(NativeApp* app, const char* database);
-NativeColRef* Firestore_collection(NativeFirestore* firestore, const char* collection_path);
-NativeDocRef* Firestore_document(NativeFirestore* firestore, const char* document_path);
-void Firestore_setSettings(NativeFirestore* firestore, NativeSettings* settings);
+NativeSettings* Firestore_getSettings(const NativeFirestore* firestore);
+NativeColRef* Firestore_collection(const NativeFirestore* firestore, const char* collection_path);
+NativeDocRef* Firestore_document(const NativeFirestore* firestore, const char* document_path);
+void Firestore_setSettings(NativeFirestore* firestore, const NativeSettings* settings);
 void Firestore_terminate(
   NativeFirestore* firestore,
   void* user_data,
@@ -59,6 +60,10 @@ void Firestore_terminate(
 void Firestore_destroy(NativeFirestore* firestore);
 
 // --- Settings ---
+const char* Settings_getHost(const NativeSettings* settings);
+bool Settings_isSslEnabled(const NativeSettings* settings);
+bool Settings_isPersistenceEnabled(const NativeSettings* settings);
+int64_t Settings_getCacheSizeBytes(const NativeSettings* settings);
 NativeSettings* Settings_create(
   const char* host,
   bool ssl_enabled,

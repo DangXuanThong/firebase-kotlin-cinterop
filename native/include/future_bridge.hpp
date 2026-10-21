@@ -71,6 +71,8 @@ inline void Future_bindCallback(
     } catch (const std::exception& e) {
       // -2 indicates serialization failure
       if (on_failure) on_failure(user_data, -2, e.what());
+    } catch (...) {
+      if (on_failure) on_failure(user_data, -2, "Unknown exception during serialization");
     }
   });
 }
