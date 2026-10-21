@@ -3,10 +3,6 @@ package io.github.dangxuanthong.firebase.firestore
 import io.github.dangxuanthong.firebase.core.Firebase
 import io.github.dangxuanthong.firebase.core.FirebaseApp
 
-expect class CollectionReference {
-    fun document(id: String): DocumentReference
-}
-
 /** Returns the [FirebaseFirestore] instance of the default [FirebaseApp][io.github.dangxuanthong.firebase.core.FirebaseApp]. */
 val Firebase.firestore: FirebaseFirestore
     get() = FirebaseFirestore.getInstance()
