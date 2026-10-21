@@ -1,9 +1,7 @@
 package io.github.dangxuanthong.firebase.firestore
 
 import cnames.structs.NativeFirestore
-import io.github.dangxuanthong.firebase.core.Firebase
 import io.github.dangxuanthong.firebase.core.FirebaseApp
-import io.github.dangxuanthong.firebase.core.app
 import io.github.dangxuanthong.firebase.core.native.Firestore_destroy
 import io.github.dangxuanthong.firebase.core.native.Firestore_getDefaultDatabase
 import io.github.dangxuanthong.firebase.core.native.Firestore_getInstance
@@ -14,7 +12,7 @@ import kotlinx.atomicfu.locks.withLock
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.toKString
 
-actual class FirebaseFirestore internal constructor(
+actual class FirebaseFirestore private constructor(
     private val firebaseApp: FirebaseApp,
     private val database: String,
     delegate: CPointer<NativeFirestore>
@@ -42,13 +40,16 @@ actual class FirebaseFirestore internal constructor(
         delegate = null
     }
 
-    internal companion object {
+    actual companion object {
+        actual val DEFAULT_DATABASE: String
+            get() = Firestore_getDefaultDatabase()!!.toKString()
+
         private val instances = mutableMapOf<FirestoreKey, FirebaseFirestore>()
         private val lock = reentrantLock()
 
-        fun getInstance(
-            app: FirebaseApp = Firebase.app,
-            database: String = Firestore_getDefaultDatabase()!!.toKString()
+        actual fun getInstance(
+            app: FirebaseApp,
+            database: String
         ): FirebaseFirestore = lock.withLock {
             checkNotNull(app.delegate) { "FirebaseApp was deleted" }
             val key = FirestoreKey(app, database)
