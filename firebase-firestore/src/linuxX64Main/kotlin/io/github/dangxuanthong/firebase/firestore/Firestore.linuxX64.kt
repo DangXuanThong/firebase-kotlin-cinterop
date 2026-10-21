@@ -8,4 +8,13 @@ actual class CollectionReference(private val path: String) {
 }
 
 actual val Firebase.firestore: FirebaseFirestore
-    get() = FirebaseFirestore(firestoreSettings {})
+    get() = FirebaseFirestore.getInstance()
+
+actual fun Firebase.firestore(app: FirebaseApp): FirebaseFirestore =
+    FirebaseFirestore.getInstance(app)
+
+actual fun Firebase.firestore(app: FirebaseApp, database: String): FirebaseFirestore =
+    FirebaseFirestore.getInstance(app, database)
+
+actual fun Firebase.firestore(database: String): FirebaseFirestore =
+    FirebaseFirestore.getInstance(database = database)

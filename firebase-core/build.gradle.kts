@@ -63,8 +63,7 @@ kotlin {
         }
         compilerOptions {
             optIn.addAll(
-                "kotlinx.cinterop.ExperimentalForeignApi", // Required for using cinterop features
-                "io.github.dangxuanthong.firebase.core.annotations.InternalFirebaseApi"
+                "kotlinx.cinterop.ExperimentalForeignApi" // Required for using cinterop features
             )
         }
     }
@@ -90,6 +89,7 @@ kotlin {
 
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
+        optIn.add("io.github.dangxuanthong.firebase.core.annotations.InternalFirebaseApi")
     }
 }
 

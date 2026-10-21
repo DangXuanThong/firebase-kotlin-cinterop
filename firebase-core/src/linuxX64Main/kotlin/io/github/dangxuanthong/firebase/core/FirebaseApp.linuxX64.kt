@@ -7,8 +7,8 @@ import io.github.dangxuanthong.firebase.core.native.App_destroy
 import io.github.dangxuanthong.firebase.core.native.App_getDefaultAppName
 import io.github.dangxuanthong.firebase.core.native.App_getName
 import io.github.dangxuanthong.firebase.core.native.App_getOptions
-import kotlinx.atomicfu.locks.SynchronizedObject
-import kotlinx.atomicfu.locks.synchronized
+import kotlinx.atomicfu.locks.reentrantLock
+import kotlinx.atomicfu.locks.withLock
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.cstr
 import kotlinx.cinterop.toKString
@@ -32,7 +32,7 @@ actual class FirebaseApp private constructor(delegate: CPointer<NativeApp>) : Au
     private val internalName: String = name
     private val internalOptions: FirebaseOptions = options
 
-    actual fun delete() = synchronized(lock) {
+    actual fun delete() = lock.withLock {
         App_destroy(delegate)
         instances.remove(internalName)
         delegate = null
@@ -51,9 +51,9 @@ actual class FirebaseApp private constructor(delegate: CPointer<NativeApp>) : Au
             get() = App_getDefaultAppName()!!.toKString()
 
         private val instances = mutableMapOf<String, FirebaseApp>()
-        private val lock = SynchronizedObject()
+        private val lock = reentrantLock()
 
-        fun getInstance(name: String = DEFAULT_APP_NAME): FirebaseApp = synchronized(lock) {
+        fun getInstance(name: String = DEFAULT_APP_NAME): FirebaseApp = lock.withLock {
             val normalizedName = name.trim()
             if (instances.containsKey(normalizedName)) return instances[normalizedName]!!
 
@@ -70,7 +70,7 @@ actual class FirebaseApp private constructor(delegate: CPointer<NativeApp>) : Au
         }
 
         fun initializeApp(options: FirebaseOptions, name: String = DEFAULT_APP_NAME): FirebaseApp =
-            synchronized(lock) {
+            lock.withLock {
                 val normalizedName = name.trim()
                 check(!instances.containsKey(normalizedName)) {
                     "FirebaseApp name $name already exists!"
@@ -87,6 +87,6 @@ actual class FirebaseApp private constructor(delegate: CPointer<NativeApp>) : Au
             }
 
         val apps: List<FirebaseApp>
-            get() = synchronized(lock) { instances.values.toList() }
+            get() = lock.withLock { instances.values.toList() }
     }
 }

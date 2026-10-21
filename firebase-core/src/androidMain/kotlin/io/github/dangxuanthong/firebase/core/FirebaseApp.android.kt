@@ -1,8 +1,11 @@
 package io.github.dangxuanthong.firebase.core
 
 import com.google.firebase.FirebaseApp as NativeFirebaseApp
+import io.github.dangxuanthong.firebase.core.annotations.InternalFirebaseApi
 
-actual class FirebaseApp internal constructor(private val delegate: NativeFirebaseApp) {
+actual class FirebaseApp internal constructor(
+    @InternalFirebaseApi val delegate: NativeFirebaseApp
+) {
 
     actual val name: String
         get() = delegate.name

@@ -1,21 +1,22 @@
 package io.github.dangxuanthong.firebase.firestore
 
-import dev.gitlive.firebase.firestore.FirebaseFirestore as RealFirebaseFirestore
-import io.github.dangxuanthong.firebase.firestore.mappers.toRealFirebaseFirestoreSettings
+import com.google.firebase.firestore.FirebaseFirestore as NativeFirebaseFirestore
 
-actual class FirebaseFirestore(private val delegate: RealFirebaseFirestore) {
+actual class FirebaseFirestore internal constructor(private val delegate: NativeFirebaseFirestore) {
     actual var settings: FirebaseFirestoreSettings
         @Deprecated("Property can only be written.", level = DeprecationLevel.ERROR)
         get() = throw NotImplementedError()
         set(value) {
-            delegate.settings = value.toRealFirebaseFirestoreSettings()
+            delegate.firestoreSettings = value.toNative()
         }
 
-    actual fun collection(collectionPath: String): CollectionReference =
-        CollectionReference(delegate.collection(collectionPath))
+//    actual fun collection(collectionPath: String): CollectionReference =
+//        CollectionReference(delegate.collection(collectionPath))
+//
+//    actual fun document(documentPath: String): DocumentReference =
+//        DocumentReference(delegate.document(documentPath))
 
-    actual fun document(documentPath: String): DocumentReference =
-        DocumentReference(delegate.document(documentPath))
-
-    actual suspend fun terminate() = delegate.terminate()
+//    actual suspend fun terminate() {
+//        delegate.terminate()
+//    }
 }

@@ -33,8 +33,7 @@ kotlin {
         compilerOptions {
             optIn.addAll(
                 "kotlinx.cinterop.ExperimentalForeignApi",
-                "kotlinx.serialization.ExperimentalSerializationApi",
-                "io.github.dangxuanthong.firebase.core.annotations.InternalFirebaseApi"
+                "kotlinx.serialization.ExperimentalSerializationApi"
             )
         }
     }
@@ -57,6 +56,7 @@ kotlin {
 
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
+        optIn.add("io.github.dangxuanthong.firebase.core.annotations.InternalFirebaseApi")
     }
 }
 

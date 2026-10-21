@@ -8,26 +8,25 @@ import io.github.dangxuanthong.firebase.core.native.Firestore_destroy
 import io.github.dangxuanthong.firebase.core.native.Firestore_getInstance
 import io.github.dangxuanthong.firebase.core.native.Firestore_setSettings
 import io.github.dangxuanthong.firebase.core.native.getDefaultDatabaseNames
-import kotlinx.atomicfu.locks.SynchronizedObject
-import kotlinx.atomicfu.locks.synchronized
+import kotlinx.atomicfu.locks.reentrantLock
+import kotlinx.atomicfu.locks.withLock
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.toKString
 
 actual class FirebaseFirestore internal constructor(
     private val firebaseApp: FirebaseApp,
-    private val databaseId: String,
-    delegate: CPointer<NativeFirestore>,
-    settings: FirebaseFirestoreSettings
+    private val database: String,
+    delegate: CPointer<NativeFirestore>
 ) : AutoCloseable {
 
     private var delegate: CPointer<NativeFirestore>? = delegate
 
-    actual var settings: FirebaseFirestoreSettings = settings
+    actual var settings: FirebaseFirestoreSettings = FirebaseFirestoreSettings()
         @Deprecated("Property can only be written.", level = DeprecationLevel.ERROR)
         get() = throw NotImplementedError()
         set(value) {
-            Firestore_setSettings(delegate, value.toNative())
-            field
+            value.toNative().use { Firestore_setSettings(delegate, it) }
+            field = value
         }
 
 //    actual fun collection(collectionPath: String): CollectionReference =
@@ -37,34 +36,30 @@ actual class FirebaseFirestore internal constructor(
 //        DocumentReference(documentPath)
 
 
-    override fun close() = synchronized(lock) {
+    override fun close() = lock.withLock {
         Firestore_destroy(delegate)
-        instances.remove(FirestoreKey(firebaseApp, databaseId))
+        instances.remove(FirestoreKey(firebaseApp, database))
         delegate = null
     }
 
     internal companion object {
         private val instances = mutableMapOf<FirestoreKey, FirebaseFirestore>()
-        private val lock = SynchronizedObject()
+        private val lock = reentrantLock()
 
         fun getInstance(
             app: FirebaseApp = Firebase.app,
-            databaseId: String = getDefaultDatabaseNames()!!.toKString(),
-            settings: FirebaseFirestoreSettings
-        ): FirebaseFirestore = synchronized(lock) {
+            database: String = getDefaultDatabaseNames()!!.toKString()
+        ): FirebaseFirestore = lock.withLock {
             checkNotNull(app.delegate) { "FirebaseApp was deleted" }
-            val key = FirestoreKey(app, databaseId)
-            if (instances.containsKey(key)) return@synchronized instances[key]!!
+            val key = FirestoreKey(app, database)
+            if (instances.containsKey(key)) return@withLock instances[key]!!
 
-            settings.toNative().use {
-                val nativeFirestore = Firestore_getInstance(app.delegate, databaseId)
-                    ?: throw IllegalStateException("Failed to initialize native Firestore instance")
-                Firestore_setSettings(nativeFirestore, it)
-                instances[key] = FirebaseFirestore(app, databaseId, nativeFirestore, settings)
-                instances[key]!!
-            }
+            val nativeFirestore = Firestore_getInstance(app.delegate, database)
+                ?: throw IllegalStateException("Failed to initialize native Firestore instance")
+            instances[key] = FirebaseFirestore(app, database, nativeFirestore)
+            instances[key]!!
         }
 
-        private data class FirestoreKey(val app: FirebaseApp, val databaseId: String)
+        private data class FirestoreKey(val app: FirebaseApp, val database: String)
     }
 }
